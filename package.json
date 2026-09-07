@@ -1,0 +1,8 @@
+{
+  "name": "codex-team-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --experimental-test-isolation=none --test", "demo": "node src/cli.mjs demo artifacts/demo" }
+}
