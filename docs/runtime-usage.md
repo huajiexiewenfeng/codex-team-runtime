@@ -15,6 +15,26 @@ node --experimental-test-isolation=none --test
 
 `snapshot.json` 是 Liaison 可读取的同一派生快照，HTML 直接由它渲染；两者显示同一源版本、源更新时间、计算时间及 SHA-256 快照标识。`READY.json` 最后写入，缺失时导出不完整。读取历史仅筛选已有状态，不推进任务或恢复汇报；历史成员使用轮次创建时的绑定，汇报栏明确展示团队当前意图。
 
+### 多轮次 HTML 工作台
+
+```powershell
+node src/cli.mjs dashboard <state.json> <new-output-directory> [asOf] [--codex-links]
+```
+
+一次导出 `index.html` 总览，以及 `round-1.html` 等历史轮次页。每页的“切换轮次”入口只在同一导出目录内导航；无需网页脚本、网络连接或后台服务。各页包含任务筛选、原生展开详情、阶段历时、完整派发审计、验收证据、成员任务定位和绑定身份。
+
+所有页面来自同一次读取的状态和同一个计算时间。轮次从 openedAt 计时，关闭后用 closedAt 冻结；任务用既有 assignedAt / completedAt 计时，两者都包含等待，不能替代模型计算耗时。所选轮次的成员绑定仍是历史身份，汇报栏是导出时团队当前记录。
+
+完整导出包含与各页对应的 `snapshot.json` / `round-N.json`，以及最后写入的 `READY.json`。该标记记录源版本、asOf、页面对应的 roundId / snapshotId、renderOptions 与 HTML / JSON 文件 SHA-256；它证明导出完整性，不证明 Worker 交付质量或宿主状态。移动或分享时应保留整个文件夹；输出含本地任务及证据摘要，请按项目资料保护，不自动发布到公网。
+
+导出必须使用新目录；重复目标拒绝覆盖。需要新进展时重新运行并选新目录，不会修改原状态、启用报告或唤醒任何任务。实时刷新、模型 / Token 采集尚未接入。最新本机版本的窄屏、筛选 / 展开 / 键盘与成员正确跳转已由用户确认正常，见 [HTML 验收记录](dashboard-validation.md)；自动测试只证明其覆盖的输出与状态语义，不替代其他环境的实测。
+
+成员对话入口默认禁用。可在命令末尾显式添加 `--codex-links`，为非模拟来源、已绑定本机 `local` 且 threadId 为受支持 UUID 的成员生成 `codex://threads/{threadId}` 兼容链接。模拟 / 未知来源、远程、未绑定、创建中、绑定缺失和异常 ID 仍不生成链接。历史页使用历史绑定。
+
+该选项仅改变 HTML 呈现，并记录为 `READY.json` 的 `renderOptions.codexLinks`；不会改写 snapshot 的宿主能力判断或真实状态。重现 HTML 时使用 `render(snapshot, {roundPages: manifest.pages, ...manifest.renderOptions})`。旧清单没有 renderOptions 时仍采用默认禁用。
+
+这是需在使用环境核对的兼容方式：本机客户端按线程 ID 查找，URL 的 `hostId` 参数不能保证主机定位，因此链接不附带该参数；已移动或多主机同 ID 的任务不能靠此入口锁定原主机。当前环境的正确跳转已有用户确认，其他浏览器可能要求确认或不支持该协议；请核对打开后的成员身份。它不是网页调用 Agent 导航工具的 API，也不发送提示词。严格宿主导航仍待接入，详见 [导航核对记录](design/codex-navigation.md)。
+
 ## 持久化 CLI
 
 ### 启动、双向配对、Worker 注册、只读恢复
@@ -289,7 +309,7 @@ claim 的事件 ID `attempt-t2-1` 成为新 attemptId，状态立即为 unknown�
 
 - 精确身份与共享状态访问：实际 Manager/Liaison/Worker 的 hostId/threadId、权限及唯一写者约束。
 - 观察适配器：从宿主工具提取必要摘要和原始时间戳，验证来源，处理缺失/不可达。
-- 网页导航：独立 HTML 的官方受支持导航方式尚未验证；全部入口禁用，准确显示绑定与原因；不编造 deep-link。
+- 网页导航：独立 HTML 的官方稳定导航契约尚未确认；默认禁用，显式 `--codex-links` 的本机兼容入口已有当前环境用户验收，严格跨主机定位仍不保证。
 - 汇报调度：期望与实际确认分离；本版 `reporting.actual` 固定 unknown，任何 reportReceipt 都标离线。没有自动化创建/暂停动作，也没有宿主暂停成功声明。
 - 新旧轮次并发、实际定时重入、退出/恢复、长期运行，以及浏览器视觉/交互与可访问性均需后续受控验证。
 

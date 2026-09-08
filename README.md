@@ -4,7 +4,11 @@ Skill-driven team coordination for Codex
 
 基于 Skill 的 Codex 长期多任务协作层。
 
-> 当前状态：最小运行层与仓库配套的早期 Skill 入口已实现。Node.js 标准库 CLI 支持持久状态、审查闭环、来源观察与同源只读 HTML，并增加本地角色建立、双向配对和手动只读恢复。完整宿主接入、长期运行与调度能力仍未交付，也未全局安装。当前优先验证 Skill 功能，HTML 暂停扩展。下文其余内容包含长期目标与拟议契约。
+**顶级模型把关，合适模型执行；降低协作总成本，不牺牲交付质量。** 当前聚焦 GPT‑6 + Codex。目标、衡量方式与取舍原则见 [North Star](NORTHSTAR.md)；这是需要持续验证的目标，不是已经证明的成本或质量承诺。
+
+> 当前状态：最小运行层与仓库配套的早期 Skill 入口已实现。Node.js 标准库 CLI 支持持久状态、审查闭环、来源观察与同源只读 HTML，并增加本地角色建立、双向配对和手动只读恢复。完整宿主接入、长期运行与调度能力仍未交付，也未全局安装。HTML 工作台现支持任务筛选、成员任务定位、耗时与派发 / 验收证据展开；仍是固定快照，不连接实时宿主。下文其余内容包含长期目标与拟议契约。
+
+看板布局与边界见 [团队只读工作台设计](docs/design/dashboard.md)。使用 `node src/cli.mjs demo <新目录>` 生成离线示例；`node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]` 一次导出总览与可互相切换的历史轮次页。单页导出仍可使用 `snapshot <state.json> <新输出目录> [asOf] [roundId]`。对话入口默认关闭，可显式生成本机兼容链接。当前版本的窄屏、筛选 / 展开 / 键盘及成员正确跳转已由用户确认正常，全量回归 185/185；见[HTML 验收记录](docs/dashboard-validation.md)。严格主机锁定、跨环境兼容保证与模型用量不因此成为已实现能力，见[导航限制](docs/design/codex-navigation.md)。
 
 离线演示：`node src/cli.mjs demo artifacts/demo`。测试：`node --experimental-test-isolation=none --test`。详见 [最小运行层使用说明](docs/runtime-usage.md)；演示明确标记模拟来源，未连接真实任务或自动化。
 
