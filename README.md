@@ -12,6 +12,8 @@ Skill-driven team coordination for Codex
 
 离线演示：`node src/cli.mjs demo artifacts/demo`。测试：`node --experimental-test-isolation=none --test`。详见 [最小运行层使用说明](docs/runtime-usage.md)；演示明确标记模拟来源，未连接真实任务或自动化。
 
+2026-09-10 增量：[Team Context MCP](docs/team-context.md) 增加独立 v2 Team Registry：Manager 维护登记，全员按精确 `hostId + threadId` 召回自己、团队和 leader，通过回执记录入队确认。当前是 **context-only 基础层，不可据此派工，尚未迁移真实团队**；Node 身份投影与派工接入为下一增量。旧 v1 locator 保留只读模式，其身份权威仍是 Node。无 AGC、hook、定时器或全局配置修改；MCP 不会自行触发 Recall，真实 Desktop 压缩、重启与跨月召回率仍未验证。本轮 102 项 Python 测试、23 项受影响 Node/Skill 回归及独立复审通过，见[Registry 基础层验证](docs/team-registry-validation.md)；[旧 locator 证据](docs/team-context-validation.md) 单独保留。
+
 汇报接入新增 [本地操作账本与播报前检查](docs/reporting-usage.md)：初始化、动作规划、结果核对以及只读 reporting-tick，防止未知结果后重复创建和无开放工作时继续普通播报。CLI 不执行宿主操作；已通过专用任务的真实创建→验收→暂停配置实测，周期投递、无人值守停报和最终总结去重仍待接入。
 
 2026-09-07 增量：`submission-notice` / `receive-submission` 已实现，并用原有专用 Manager、Liaison、Worker 完成一次无定时器现场闭环：两次 Worker 原生消息分别触发 Manager 新回合，经过审查、约定需求变化返工、复验和收口；重复/旧通知未重复推进状态，Liaison 跨回合只读查询与耗时冻结通过。全量离线测试 126/126，通过不代表消息认证、恰好一次投递或跨月稳定性已验证。详见 [最新提交证据](docs/submission-evidence.md)。
@@ -79,7 +81,7 @@ Skill-driven team coordination for Codex
 - [Manager Session 设计草案](docs/design/manager-session.md)：职责、控制与查询通道、生命周期、状态、恢复、组合边界和 34 条验收场景。
 - [V1 范围与验证门槛](docs/v1-scope.md)：第一版交付范围、非目标、建议默认值与待验证条件。
 
-CLI 命令见使用说明。早期入口位于 [skills/manager-session/SKILL.md](skills/manager-session/SKILL.md)，需要指定可信运行层仓库和状态路径；可在 Codex 中显式引用该文件，或直接运行其只读查询脚本。单独复制 Skill 不会携带运行层。`start` 建立本地 Manager 记录，`attach` 记录邀请并由目标 Liaison 确认，`resume` 只读恢复角色上下文。它们接收调用方声明的身份，不是宿主认证接口；Skill 必须另行核对当前独立任务身份。阅读入口和恢复记录均不会自动创建任务、安装 hook 或安排自动化，周期监督及实际停报仍待接入。
+CLI 命令见使用说明。早期入口位于 [skills/manager-session/SKILL.md](skills/manager-session/SKILL.md)，需要可信运行层仓库；状态路径可显式提供，也可在已接入可选 MCP 且登记身份后找回。可在 Codex 中显式引用该文件，或直接运行其只读查询脚本。单独复制 Skill 不会携带运行层。`start` 建立本地 Manager 记录，`attach` 记录邀请并由目标 Liaison 确认，`resume` 只读恢复角色上下文。它们接收调用方声明的身份，不是宿主认证接口；Skill 必须另行核对当前独立任务身份。阅读入口和恢复记录均不会自动创建任务、安装 hook 或安排自动化，周期监督及实际停报仍待接入。
 
 下一步由父任务独立验收该切片，并对未接入的宿主接口开展授权范围内的现场验证。离线测试结果不等于长期团队运行验收。
 
