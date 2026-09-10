@@ -1,6 +1,6 @@
 ---
 name: manager-session
-description: Inspect a codex-team-runtime team or explicitly operate its Manager and Liaison roles with the companion runtime. Use for team supervision and acceptance, not ordinary coding or one-shot delivery.
+description: Use for codex-team-runtime team supervision, acceptance, or established Manager, Liaison and Worker role recovery after continuation or context loss; not ordinary coding or one-shot delivery.
 ---
 
 # Manager Session — early repository companion
@@ -9,7 +9,7 @@ Reading this skill does not activate a role. Status/history queries never create
 
 ## Locate the runtime
 
-Obtain the user-selected trusted checkout and state-file path. `runtime-root` is the checkout containing `src/cli.mjs`, not the state directory. Do not guess paths or current task identity from titles or inspect private logs. A separately installed copy still needs the companion checkout and Node.js 22+; do not install globally or duplicate the runtime.
+Obtain the user-selected trusted checkout. `runtime-root` is the checkout containing `src/cli.mjs`, not the state directory. Use a verified state-file path when known; if it was lost, the optional legacy locator MCP can recover it through Team context recall below. The v2 context-only registry does not yet provide a Node state locator or execution integration. Ask for the original locator when recovery is unavailable. Do not guess paths or current task identity from titles, inspect private logs, or create replacement state. A separately installed copy still needs the companion checkout and Node.js 22+; do not install globally or duplicate the runtime.
 
 For status, run this skill's absolute script path (quote paths containing spaces):
 
@@ -18,6 +18,14 @@ node <skill-directory>/scripts/status.mjs --runtime-root <trusted-checkout> --st
 ```
 
 This prints the canonical runtime snapshot without writing files or invoking host tools. Status needs no current-role identity. Selected history retains historical member bindings and current reporting intent. Report source version/time, task/stage elapsed time, latest effective progress and blockers; distinguish submission from acceptance. Stale observation is not proof of failure. `reporting.actual: unknown` remains unknown.
+
+## Team context recall — all formal members
+
+Manager, Liaison and Workers share [the team-context contract](references/team-context.md): recover own identity, team, exact leader and role duties, not only a role label. Read that reference for onboarding, foreground continuation/context loss, delivery or acceptance, stale/conflicting context, or membership maintenance. New formal-member handoffs carry this same reference and verified read arguments; reading it in Manager does not load it in other tasks.
+
+Use `team_context.read` with verified **current hostId + threadId**; temporary helpers must not inherit a parent's role identity. Active context does not grant work authorization; null is unregistered, inactive is not a resumable role, and errors are not null. Current work/evidence needs its own verified source. MCP does not call itself or authenticate the caller.
+
+Only Manager maintains the v2 registry, after externally verified bootstrap/member authorization and any required consent. Members read and return onboarding receipts; Manager verifies and records them. Registered is not ready; ready is not dispatch permission or proof of future recall. V2 is currently **context-only** (`dispatchAllowed: false`): do not adopt a live legacy team or bypass Node gates. Legacy locator mode is read-only and retains Node authority. Setup and exact APIs: `<trusted-checkout>/docs/team-context.md`. No global installation, hook or timer is implied.
 
 ## Intent routing
 

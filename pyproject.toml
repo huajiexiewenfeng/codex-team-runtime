@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-team-context"
+version = "0.1.0"
+description = "Deterministic role context lookup for codex-team-runtime"
+requires-python = ">=3.10"
+dependencies = ["mcp>=2,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+codex-team-context = "codex_team_context.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "python/src"}
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+addopts = "-ra"

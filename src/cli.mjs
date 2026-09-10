@@ -84,9 +84,16 @@ export async function run(args,output=console.log) {
   }
   case 'init': { if(a.length<2||a.length>3) throw new Error('init <config.json> <state.json> [at]'); const s=createState(await json(a[0]),a[2]??now()); await initialize(a[1],s); output(`Initialized version ${s.version}`); break; }
   case 'apply': { if(a.length!==3||!/^\d+$/.test(a[2])) throw new Error('apply <state.json> <event.json> <expectedVersion>'); const s=await transact(a[0],Number(a[2]),await json(a[1])); output(`Applied version ${s.version}`); break; }
+  case 'dashboard': {
+   const codexLinks=a.at(-1)==='--codex-links',values=codexLinks?a.slice(0,-1):a;
+   if(values.length<2||values.length>3||values.slice(2).some(x=>x.startsWith('--')))throw new Error('dashboard <state.json> <new-output-directory> [asOf] [--codex-links]');
+   const {exportDashboard}=await import('./dashboard-export.mjs');
+   const manifest=await exportDashboard(await readState(values[0]),resolve(values[1]),values[2]??now(),{codexLinks});
+   output(`Read-only dashboard v${manifest.sourceVersion}: ${resolve(a[1],'index.html')} (${manifest.pages.length} pages)`);break;
+  }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, init, apply, snapshot, render, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, init, apply, snapshot, render, dashboard, demo. See docs/runtime-usage.md');
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});
