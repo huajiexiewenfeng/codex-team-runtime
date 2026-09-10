@@ -2,88 +2,173 @@
 
 Skill-driven team coordination for Codex
 
-基于 Skill 的 Codex 长期多任务协作层。
+面向 Codex 长期开发任务的轻量协作层，以 `manager-session` Skill 为入口，将需求沟通、团队协调、执行与独立验收分开，并通过 MCP 恢复长期对话中的团队身份。
 
-**顶级模型把关，合适模型执行；降低协作总成本，不牺牲交付质量。** 当前聚焦 GPT‑6 + Codex。目标、衡量方式与取舍原则见 [North Star](NORTHSTAR.md)；这是需要持续验证的目标，不是已经证明的成本或质量承诺。
+**顶级模型把关，合适模型执行；降低协作总成本，不牺牲交付质量。** 当前聚焦 GPT-6 + Codex。成本与质量收益是待对照验证的目标，不是既成承诺；详见 [North Star](NORTHSTAR.md)。
 
-> 当前状态：最小运行层与仓库配套的早期 Skill 入口已实现。Node.js 标准库 CLI 支持持久状态、审查闭环、来源观察与同源只读 HTML，并增加本地角色建立、双向配对和手动只读恢复。完整宿主接入、长期运行与调度能力仍未交付，也未全局安装。HTML 工作台现支持任务筛选、成员任务定位、耗时与派发 / 验收证据展开；仍是固定快照，不连接实时宿主。下文其余内容包含长期目标与拟议契约。
+> 长期存在的是身份、状态与协作约定，不是永不停机的 Agent 循环。
 
-看板布局与边界见 [团队只读工作台设计](docs/design/dashboard.md)。使用 `node src/cli.mjs demo <新目录>` 生成离线示例；`node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]` 一次导出总览与可互相切换的历史轮次页。单页导出仍可使用 `snapshot <state.json> <新输出目录> [asOf] [roundId]`。对话入口默认关闭，可显式生成本机兼容链接。当前版本的窄屏、筛选 / 展开 / 键盘及成员正确跳转已由用户确认正常，全量回归 185/185；见[HTML 验收记录](docs/dashboard-validation.md)。严格主机锁定、跨环境兼容保证与模型用量不因此成为已实现能力，见[导航限制](docs/design/codex-navigation.md)。
+## 当前状态
 
-离线演示：`node src/cli.mjs demo artifacts/demo`。测试：`node --experimental-test-isolation=none --test`。详见 [最小运行层使用说明](docs/runtime-usage.md)；演示明确标记模拟来源，未连接真实任务或自动化。
+**2026-09-10 架构基线：核心协议已实现，进入真实使用与渐进验证。** 本文包含已在本地安装、尚未全部提交发布的 Registry cutover 增量；不能将架构图或文档提交视为同版本代码已经发布。具体接口以所用 checkout / companion 版本为准。
 
-2026-09-10 增量：[Team Context MCP](docs/team-context.md) 增加独立 v2 Team Registry：Manager 维护登记，全员按精确 `hostId + threadId` 召回自己、团队和 leader，通过回执记录入队确认。当前是 **context-only 基础层，不可据此派工，尚未迁移真实团队**；Node 身份投影与派工接入为下一增量。旧 v1 locator 保留只读模式，其身份权威仍是 Node。无 AGC、hook、定时器或全局配置修改；MCP 不会自行触发 Recall，真实 Desktop 压缩、重启与跨月召回率仍未验证。本轮 102 项 Python 测试、23 项受影响 Node/Skill 回归及独立复审通过，见[Registry 基础层验证](docs/team-registry-validation.md)；[旧 locator 证据](docs/team-context-validation.md) 单独保留。
+| 范围 | 已有能力与证据 | 仍需验证或不保证 |
+| --- | --- | --- |
+| 业务运行层 | 持久轮次/任务、FIFO 队列、占用保护、提交与独立验收、投递恢复 | 不保证原生消息恰好一次送达，不支持已启动任务的强制抢占与重新分配 |
+| 长期角色记忆 | Python MCP + Team Registry；全员精确身份召回、Manager 登记与回执确认 | MCP 不主动触发；跨月、多次自然压缩后的召回率仍待验证 |
+| Registry 运行接入 | 本地 cutover 增量连接当前身份与 Node 业务状态，保留历史；一键升级团队两名正式成员已迁入并本人确认 | 不自动迁入其他团队，不代表所有窗口已加载新版；新版真实 Worker 完整闭环仍需测试 |
+| HTML 工作台 | 同源只读快照、筛选、轮次历史、成员、历时与交付证据 | 不实时刷新、不派工；未自动采集 Token/费用 |
+| 监督与汇报 | Worker 通知、前台有界检查、汇报操作账本；旧版已有现场闭环证据 | 非常驻调度器；无人值守停报、自动收件箱及强制到期宿主接入尚未完整交付 |
 
-汇报接入新增 [本地操作账本与播报前检查](docs/reporting-usage.md)：初始化、动作规划、结果核对以及只读 reporting-tick，防止未知结果后重复创建和无开放工作时继续普通播报。CLI 不执行宿主操作；已通过专用任务的真实创建→验收→暂停配置实测，周期投递、无人值守停报和最终总结去重仍待接入。
+本地安装、MCP 连接加载、成员本人恢复和自然召回成功是不同结果，不能相互替代。阶段性验证见下文，不能将旧版本测试直接当作新版全链路通过。
 
-2026-09-07 增量：`submission-notice` / `receive-submission` 已实现，并用原有专用 Manager、Liaison、Worker 完成一次无定时器现场闭环：两次 Worker 原生消息分别触发 Manager 新回合，经过审查、约定需求变化返工、复验和收口；重复/旧通知未重复推进状态，Liaison 跨回合只读查询与耗时冻结通过。全量离线测试 126/126，通过不代表消息认证、恰好一次投递或跨月稳定性已验证。详见 [最新提交证据](docs/submission-evidence.md)。
+## 总体架构
 
-## 为什么做这个项目
+![Manager Session Runtime 总体架构：团队角色协作，Python MCP 与 Registry 身份记忆，Node 业务状态，以及 Codex 宿主和只读 HTML](docs/assets/runtime-architecture-20260910.png)
 
-忙碌 Worker 修复：已增加 Manager 侧持久 FIFO 队列（`queue-task` / `dispatch-plan` / `start-task`），并支持用户明确撤回尚未启动的任务（`cancel-queued`）。未验收在制任务持续占用 Worker，禁止重复派发或插队；排队和取消排队均不发送宿主消息。取消保留历史，不计作验收。最新全量离线测试 160/160，Skill 格式校验通过。需要当前 Manager 前台重新读取更新后的 Skill；未全局安装，未向业务任务注入更新。详见 [队列契约与边界](docs/runtime-usage.md#忙碌-worker-与-manager-侧队列) 和 [验证记录](docs/busy-worker-evidence.md)。
+图为当前设计概览，分组表示职责而非部署机器；连线不构成完整执行时序。用户仍可直接与 Manager 或 Worker 沟通。Node 的身份校验通过 Python 只读 exporter 完成；state 到 HTML 表示经运行层导出的快照。
 
-派发恢复新增 `delivery-plan` / `delivery-check` / `delivery-claim`：只有核实未送达后才能为原任务登记新发送尝试；未知结果保留占用并核查，不盲重发。CLI 不发消息，不释放已启动任务，也不保证宿主 exactly-once；[恢复契约](docs/runtime-usage.md#同一任务的派发恢复) 已加入配套 Skill。专用测试团队已完成受控的跨回合恢复、真实派发、提交及独立验收；真实断网、应用崩溃和迟到请求仍待现场验证，详见[实测摘要](docs/delivery-canary-evidence.md)。
+| 层 | 组成 | 职责 |
+| --- | --- | --- |
+| 协作契约 | `manager-session` Skill / references | 全员召回、角色边界、委派、占用保护、回报与验收约定 |
+| 身份与角色记忆 | Python Team Context MCP / Team Registry | 确定性身份访问、正式名册、精确 leader、规则版本、入队确认 |
+| 业务运行层 | Node.js CLI / 状态机 / `state.json` | 轮次、任务、队列、提交、验收、历史与审计 |
+| 宿主执行与展示 | Codex 原生工具 / 派生 HTML | 宿主执行真实任务与消息操作；页面只读展示 |
 
-长期开发需要的不只是“把任务发出去”，还包括检查产物、反馈问题、推动返工、独立验收，以及让用户持续了解进度。
+**模型负责判断，代码负责校验已编码的不变量，宿主负责真实动作。**
 
-本项目希望把这些职责分开：用户在沟通窗口讨论需求、查看进展；Manager 在另一个任务中监督执行；代码修改、构建和部署交给有明确范围的独立 Worker。
+已链接团队的当前身份以 Registry 为权威；Node 维护业务历史并读取经校验的成员投影。宿主实际状态以原生工具证据为准，HTML 不拥有第二份可写状态。裸 `state.json` 内的成员缓存不一定是最新身份，应通过正式读取入口查询。
 
-`runtime` 指角色、状态、协作协议和生命周期组成的轻量运行层。项目计划借助 Codex 宿主的任务、权限和定时能力，不重新实现模型执行引擎，也不把一份提示词当作独立后台服务。拟议的使用入口是 `manager-session` Skill。
+详细说明：[总体架构设计](docs/design/manager-session-runtime-architecture.md) · [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)。
 
-## 三个角色
+## 角色分工
 
 | 角色 | 主要职责 | 边界 |
 | --- | --- | --- |
-| Liaison：沟通窗口 | 需求讨论、问题解释、只读进度查询、周期汇报，转交用户已确认的决定 | 不直接指挥 Worker，不批准技术验收，不代批宿主权限 |
-| Manager：监督窗口 | 范围核对、拆解委派、依赖协调、持续审查、返工、独立验收，维护权威进度 | 默认不亲自修改业务代码，不把日常问答当作调度输入 |
-| Worker：执行任务 | 在明确所有权内实现、测试、构建或部署，并提供可核验的交付证据 | 不自行扩大范围，不把自报完成当作最终验收 |
+| 用户 | 目标、范围、重大取舍、授权与必要的人工作业验收 | 可直接进入成员任务交流；直接消息仍可能干扰正在执行的工作 |
+| Manager | 需求确认、拆解派发、成员登记、协调、监督、返工与独立验收 | 默认委派实现；不能代 Worker submit，不把完成声明当作已验收 |
+| Liaison | 日常沟通、只读进度解释、问题讨论、转交已确认决定 | 不派工、不指挥 Worker、不代验收；工作关闭后停止普通进度汇报 |
+| Worker | 在明确范围与文件所有权内实现、测试、构建或部署，提供证据并回报 | 不扩大授权，不自行更换 leader，交付前恢复自身团队身份 |
+| 临时 Subagent | 有界探索、实现或审查辅助 | 不因继承上下文成为正式成员，不冒用父任务身份 |
 
-用户始终保留目标、重大取舍、权限以及约定的人工作业验收决定权。Manager 可以检查源码与日志、执行获授权的独立验证；验证可能产生文件，不能伪称全是只读操作。
+典型沟通关系是“用户 ↔ Liaison ↔ Manager ↔ Workers”，不是强制消息总线。拆分窗口旨在减少干扰，不保证所有交互绝不打断。“已转交”“已收到”“已执行”必须分别核对；Liaison 到 Manager 的持久命令收件箱尚未实现。
 
-## 协作方式
+## 长期角色记忆与召回
 
-1. 用户明确启用角色并建立 Manager / Liaison 配对；启用角色本身不创建 Worker 或自动化。
-2. 用户在 Liaison 中确定本轮目标、范围和验收条件。普通进度查询只读状态，不逐次向 Manager 或 Worker 发消息。
-3. Manager 在授权范围内创建或复用独立执行任务，持续检查进展和可审查产物。
-4. 发现问题后，Manager 向原 Worker 给出具体证据与修正条件，复验后才批准交付。
-5. Liaison 按已确认的周期报告进度与重要事件。新的控制请求须由 Manager 核对并回执，不能把“已转交”说成“已生效”。
+Skill 是按需加载的规则，不是持久数据库。MCP 提供独立记忆入口，确定性 Python 代码维护 Team Registry，不调用 LLM，不依赖 AGC、hook 或定时轮询。
 
-拆分窗口的目标是减少日常问答对监督的干扰，不是保证所有交互绝不打断。范围变更、暂停与退出属于明确的控制操作，仍需核对实际效果。
+`team_context.read({host_id, thread_id})` 按**当前独立任务经核对的精确身份**返回自己、team、leader、版本化职责和入队状态。active Manager 额外获得正式名册；已链接团队还能恢复原 state、runtime 与 Python 定位。
 
-## 长期角色，不等于无限运行
+- `active`：恢复角色，随后核对接入、当前工作与授权；不代表宿主在线或空闲。
+- `null`：未登记，不自动注册；普通工作照常，已知团队先找回原定位。
+- `inactive`：已退出，不从旧摘要重新恢复角色。
+- 错误或不可用：暂停受影响的角色操作，不当作 null，不创建空表或绕回旧身份权威。
 
-- 角色支持跨多轮需求持续存在，只有显式退出才解除；跨月恢复是设计目标，尚未经过长期实测。
-- Worker 的最终回答只是待审查交付，不等于本轮目标完成。
-- 还有其他开放轮次时，继续监督与周期汇报。
-- Manager 确认全部工作收口后，Liaison 交付一次最终总结，并停止普通进度汇报和不再需要的定时唤醒。
-- 工作结束后保留角色和手动问答；普通历史查询不会重新开工或恢复定时。
-- 新的已授权轮次恢复业务协作，但不自动恢复定时器；定时运行须另经用户确认，保留用户关闭汇报的选择。
-- 退出角色、停止汇报、静音通知和取消执行是不同操作；不能以窗口关闭或消息发送代替实际取消。
+**全员使用同一契约**：首次入队、前台续接或上下文丢失、身份/规则冲突，以及交付、接收、验收前进行召回；其他协调动作在上下文缺失或过时时恢复。不在每次文件读写前重复调用。
 
-## 与其他 Skill 的关系
+角色记忆不等于任务记忆：先恢复“我是谁、向谁负责”，再从原业务状态和 brief 恢复“当前获授权做什么”。工具描述可能仍进入其他对话目录，未登记返回 null 不等于零 prompt 开销。
 
-- **领域 Skill** 定义如何开发、测试或部署；团队协作层定义由谁执行、何时审查和何时收口。
-- **task-dispatch** 保留投递即止语义。受管工作需要独立的监督与验收契约，不改变已有 Skill 的终止规则。
-- **PDC（Project Develop Copilot）** 继续拥有其项目知识与调度状态。组合时只保留一个调度所有者，不建立第二份可编辑的业务状态。该组合仍待验证。
+> 持久记忆可恢复，不等于 Agent 必然主动想起。当前没有强制注入或自动触发保证，自然召回率是下一阶段的重点指标。
 
-原生受管模式计划独立使用；V1 不以修改或安装 task-dispatch、重写 PDC 为前提。
+## 成员登记与业务准入
 
-## V1 关注什么
+1. 用户授权启用团队或加入正式成员，Manager 核对原生 host/thread 身份与授权。
+2. Manager 维护团队及成员登记；Worker/Liaison 不自行注册或选择 leader，Liaison 还需本人同意。
+3. 每位成员在自己的任务加载共同规则并 read，回传 `onboardingReceipt` 和职责理解。
+4. Manager 核对真实回复来源并 `confirm_ready`；Manager 自己也需本人 read/确认。
+5. 复读当前状态，再检查工作授权、成员占用、FIFO、宿主状态和投递条件。
 
-第一版聚焦一组 Manager / Liaison、受管 Worker 的审查闭环、轻量持久状态、角色恢复、周期汇报，以及完成后自动停止。
+**registered ≠ ready ≠ 工作授权。** 回执不是身份认证、理解能力或未来召回证明；`dispatchAllowed=false` 表示 context read 不授予或执行派工，并不需要将它改为 true。
 
-默认在制工作上限 3 项；监督和汇报定时器均默认关闭，优先使用 Worker 完成/阻塞消息及用户主动查询。定时器仅按用户明确授权启用，每次固定期限最多 24 小时，续期必须由人再次确认；缺少已验证的宿主到期停止能力时不启用。5/15 分钟仅为获授权后的可选节奏，不是默认运行策略。
+未链接团队为 `not-connected`，只提供身份上下文；已链接为 `connected`，仍需通过业务准入；`migration-pending` 阻止普通业务操作。新成员不会自动加入旧轮次。
 
-不做通用任务平台、独立可写看板、自建常驻调度服务、多 Manager 统一调度，或跨所有宿主的权限强制层。已批准的最小切片包含同源只读 HTML。
+## 任务闭环与忙碌保护
+
+主路径是 `queued → executing → submitted → reviewing → approved`。审查可进入 `rework → submitted`；仅未启动的 queued 任务可以明确取消为 `cancelled`。执行、提交、审查和返工阶段可阻塞，恢复遵循原状态记录。
+
+- Worker 本人持久化 submit 后，准备并核对通知，再通过获授权的原生消息向精确 Manager 回报。
+- Manager 接收提交并核对实际证据，独立验收或要求返工。通知准备不等于已发送，原生最终回答不等于已验收。
+- 未验收任务持续占用 Worker。独立新需求进入 Manager 侧持久 FIFO 队列，不发送“做完后顺便做任务2”来代替排队。
+- 原生 idle、相同技术领域或紧急程度都不自动释放占用；当前任务的窄范围澄清与返工不等于独立新需求。
+- 投递结果 unknown 时保留占用并对账。只有确认未送达且不会迟到，才能领取新的发送尝试；不盲重发、不换 ID 绕过。
+
+完成轮次不退出长期角色；角色退出也不等于停止、取消或归档原生 Worker。详见 [运行层接口](docs/runtime-usage.md)、[投递恢复契约](skills/manager-session/references/delivery-recovery.md)。
+
+## 监督与汇报：默认无定时器
+
+默认推进来自 Worker 完成/阻塞通知、用户主动续接与查询。Manager 进行前台有界检查，Liaison 从可信快照解释进度，不为每次询问唤醒团队。消息失败或 Manager 未被唤醒时，当前系统不能保证自动恢复。
+
+定时器默认关闭；启用必须由人确认固定窗口，**最多24小时，续期再次确认**。没有已验证的宿主到期停止能力时不启用。新任务、新轮次、角色恢复或“继续”都不自动恢复定时器。5/15分钟仅是获授权后可选节奏。
+
+相关工作关闭后停止普通进度汇报，保留历史问答与角色；停止汇报、静音、角色退出和取消执行是不同操作。[汇报账本](docs/reporting-usage.md) 记录操作及未知结果，不等于真实调度器或原生送达证据。
+
+## 模型策略与 Skill 组合
+
+- Manager 的模型与强度由用户指定，保留用户配置。
+- 新正式 Liaison/Worker 默认 Sol / medium；临时 Subagent 默认 Sol / medium 或适合的 Terra/Luna，不超过直接父 Agent 的模型等级。复用成员不擅自改模型。
+- 模型策略是 Skill 约定，由宿主执行，不是 Node 强制校验器或性能保证。
+- 同一受管工作只有一个调度与最终验收所有者。PDC 可提供项目知识与阶段方法，不隐式接管既有团队。
+- `task-dispatch` 保留投递即止语义；`project-task-dispatch` 有自己的控制状态。本契约下需用户明确选择，遇到已有所有者先确认非重叠范围或交接。
+- 本项目不依赖修改其他 Skill，不保证外部 Skill 自动遵守契约，也未实现跨运行层自动迁移。
+
+成员命名采用 `角色-项目简称-任务主题`；长期 Manager/Liaison 可省略主题。名称帮助识别，不能代替精确 host/thread 绑定。
+
+## 使用与升级
+
+需要可信运行代码与 Node.js 22+；MCP 需要 Python 3.10+ 及官方 MCP Python SDK。单独复制 Skill 不会携带运行层。
+
+先体验不接入真实团队的离线演示：
+
+```text
+node src/cli.mjs demo artifacts/demo
+```
+
+输出目录必须是新目录，示例明确标记模拟来源，不连接真实任务或自动化。已有可信状态可导出只读工作台：
+
+```text
+node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]
+```
+
+单页可用 `snapshot <state.json> <新输出目录> [asOf] [roundId]`。工作台支持总览、历史轮次、任务筛选、成员、历时与证据展开；对话链接需显式启用，仅为本机兼容入口，不保证跨主机定位。历时包含排队、等待与审查，不等于模型计算耗时。
+
+团队接入从 [manager-session Skill](skills/manager-session/SKILL.md) 和 [MCP 使用说明](docs/team-context.md) 开始。读取 Skill 不激活角色，不授权安装、创建任务或定时器。
+
+长期使用应安装稳定、同版本的非 editable Python 环境、Node companion 与 Skill，将 Registry/state 与代码分开。更新保留原数据路径，不复制第二份团队；安装完成后仍需逐任务确认 MCP 已加载新版。
+
+旧团队由**原 Manager 获授权后显式迁入**，保留正式名册、备份与业务历史，迁入后全员本人重新确认。不自动扫描历史协作者、恢复旧任务或启动定时器。未链接 legacy 的 `start/attach/resume` 仍有其限定用途；不能用旧身份写入绕过已链接 Registry 的错误。
+
+## 验证证据与下一步
+
+本 README 更新没有重跑业务测试。以下为架构基线记录的历史证据，不是本次验证或长期效果保证：
+
+| 证据 | 范围 |
+| --- | --- |
+| 本地 cutover 基线：Python 133项、Node 项目196项及相关修复回归 | 隔离协议/集成、独立审查与修复回归；详细本地记录尚未随文档提交发布 |
+| 一键升级团队迁入：两名正式成员 ready | 原 Manager 与 Liaison 本人引导恢复；没有登记历史 Worker、恢复旧任务或启用定时器 |
+| [Registry 基础层验证](docs/team-registry-validation.md) / [旧 locator 验证](docs/team-context-validation.md) | 早期身份层与定位协议证据 |
+| [提交通知现场闭环](docs/submission-evidence.md) | 旧版真实消息、审查、返工、复验与收口；不是新版全链路保证 |
+| [忙碌与 FIFO 验证](docs/busy-worker-evidence.md) / [投递恢复实测](docs/delivery-canary-evidence.md) | 占用、排队、取消与受控跨回合投递恢复 |
+| [HTML 验收记录](docs/dashboard-validation.md) | 看板筛选、展开、窄屏、键盘与成员入口；[导航限制](docs/design/codex-navigation.md) 仍适用 |
+
+开发者可执行 `node --experimental-test-isolation=none --test`；Python 测试按 MCP 文档配置独立环境。
+
+下一阶段以真实任务的小步验证为主：
+
+1. 新版链接团队的 Worker 新任务 → 回报 → 返工 → 独立验收完整闭环。
+2. 不提示工具名时，重启、闲置、压缩和规则更新后的自然召回率、职责执行与人工纠偏。
+3. 在相同质量门槛下比较团队总 Token/费用，记录无效召回及对无关对话的干扰。
+4. 改善旧 MCP 连接识别与版本可观测性；只有确需定时能力时再完善宿主接入。
+
+不承诺永不遗忘、无限自治、强身份认证、跨主机锁、全局原子事务或固定 Token 节省比例。
 
 ## 文档
 
-- [Manager Session 设计草案](docs/design/manager-session.md)：职责、控制与查询通道、生命周期、状态、恢复、组合边界和 34 条验收场景。
-- [V1 范围与验证门槛](docs/v1-scope.md)：第一版交付范围、非目标、建议默认值与待验证条件。
-
-CLI 命令见使用说明。早期入口位于 [skills/manager-session/SKILL.md](skills/manager-session/SKILL.md)，需要可信运行层仓库；状态路径可显式提供，也可在已接入可选 MCP 且登记身份后找回。可在 Codex 中显式引用该文件，或直接运行其只读查询脚本。单独复制 Skill 不会携带运行层。`start` 建立本地 Manager 记录，`attach` 记录邀请并由目标 Liaison 确认，`resume` 只读恢复角色上下文。它们接收调用方声明的身份，不是宿主认证接口；Skill 必须另行核对当前独立任务身份。阅读入口和恢复记录均不会自动创建任务、安装 hook 或安排自动化，周期监督及实际停报仍待接入。
-
-下一步由父任务独立验收该切片，并对未接入的宿主接口开展授权范围内的现场验证。离线测试结果不等于长期团队运行验收。
+- [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
+- [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)：问题、MCP 选择、恢复节点与自然召回验证。
+- [运行层使用说明](docs/runtime-usage.md) / [MCP 接口](docs/team-context.md) / [汇报账本](docs/reporting-usage.md)。
+- [只读工作台设计](docs/design/dashboard.md)。
+- [原始设计草案](docs/design/manager-session.md) / [V1 范围与验证门槛](docs/v1-scope.md)：保留阶段性设计与验收上下文。
+- 本地 cutover 补充材料：`docs/team-registry-cutover.md`、`docs/team-registry-cutover-validation.md`；尚未随本次文档提交发布。
 
 ## License
 
