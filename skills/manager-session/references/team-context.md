@@ -23,9 +23,12 @@ identity, current work and authorization before contacting any of them.
 - Active: recover context, then honor its integration barrier and work boundaries.
 - Null: ordinary unregistered work continues; known team work needs its original
   reference, not a guessed role, replacement team or automatic registration.
+  Explicit first Manager activation is a different intent: use
+  [activation routing](activation.md) to decide whether initialization is needed;
+  null alone neither authorizes a write nor requires a previous state file.
 - Inactive: do not resume that role from history or recreate it to bypass exit.
 - Error/unavailable: hold the affected role-dependent action. Legacy locator mode
-  can use read-only `resume` with its verified original state; a v2 error must not
+  can use read-only `resume` with its verified original state; a Registry error must not
   be bypassed by treating that same team as legacy.
 - Leader exited/unavailable: preserve membership, work and evidence. Do not elect
   a leader, claim delivery, or repeatedly message; ask for human direction when
@@ -34,6 +37,11 @@ identity, current work and authorization before contacting any of them.
 
 ## Registration and onboarding
 
+For first activation, read [activation routing](activation.md): default setup is
+the current Manager plus one independent Liaison and one Worker, reusing valid
+members. A new executable team follows start/real pairing and registration/adopt,
+then own reads and readiness. Do not bootstrap it first: identity-only
+registration is not a fresh executable team connection.
 Only Manager writes `team_context.manage`; Worker/Liaison never self-register or
 select their leader. First bootstrap needs explicit user-authorized activation,
 verified current Manager identity and its authorization reference. A reference is
@@ -53,9 +61,13 @@ For a user-authorized formal member:
 4. Manager independently checks the exact member response, confirms the returned
    receipt with an evidence reference, then re-reads. A wrong identity/leader/rule
    version must be reconciled, not rewritten to make confirmation pass.
-5. Apply connected-runtime authorization, ownership, busy-worker and delivery gates
-   before work. In the current context-only increment this step is not connected:
-   `dispatchAllowed: false` forbids using registry readiness to dispatch.
+5. Re-read integration state. `not-connected` cannot operate a live Node team from
+   Registry readiness; `migration-pending` blocks business operations. `connected`
+   still requires runtime authorization, readiness, ownership, busy-worker/FIFO,
+   native idle and delivery gates. `dispatchAllowed: false` means the context read
+   grants no dispatch permission; it is not a requirement to change that field.
+   A newly registered Worker is not automatically in an existing round: Manager
+   explicitly applies `admitRegistryMember` after readiness, before normal admission.
 
 An onboarding receipt is a deterministic declaration, not a secret or proof of
 model comprehension. Even Manager performs its own read/confirmation. A verified
@@ -82,11 +94,22 @@ state/task references, authorized model/effort, scope and return destination. A
 generic read response is not a substitute for the task brief. Existing members are
 not recreated, renamed, interrupted or reconfigured merely to refresh the rules.
 
-## Current release boundary
+## Linked teams and migration boundary
 
-V2 registry is an isolated context-only foundation; it has no Node state locator,
-task admission, automatic import, live-team adoption or global installation.
-Legacy `--index` mode only reads the earlier locator format and Node remains its
-identity authority. Do not place the same live team under both modes. The Node
-projection/cutover increment must preserve historical round identity and provide
-recoverable adoption before real v2 dispatch. See `<trusted-checkout>/docs/team-context.md`.
+Unlinked schema-2 teams remain context-only. Explicit `adopt_legacy` upgrades the
+Registry to schema 3 and the original Node state to schema 2, preserving IDs,
+member lifecycles and business history. Only the original Manager performs an
+authorized cutover using `<runtime-root>/docs/team-registry-cutover.md`. Import
+the verified formal roster, not inferred historical collaborators. No automatic
+import, registration, task restart, messages, timer or installation occurs.
+
+Linked context supplies same-host runtime/state/Python locators. Node checks the
+Registry projection; legacy Node identity commands cannot write linked teams.
+All active imported members begin pending and each must read its own context and
+return its own receipt. Manager reading once does not onboard other members.
+Old policy receipts require new confirmation, not rewriting historical evidence.
+
+Legacy `--index` remains read-only with Node identity authority; never use it to
+bypass a linked Registry failure. Missing files/errors are not unregistered null.
+Follow forward recovery with the same operation/request; never restore an old
+Node snapshot after Registry commit. See `<runtime-root>/docs/team-context.md`.

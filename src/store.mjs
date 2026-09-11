@@ -1,9 +1,12 @@
 import { open, readFile, rename, unlink, link } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { validate, evolve } from './runtime.mjs';
+import { projectRegistryState, withFileLocks, withStateGuard } from './registry-projection.mjs';
 
-export async function readState(path) { return validate(JSON.parse(await readFile(path,'utf8'))); }
+export async function readRawState(path) { return validate(JSON.parse(await readFile(path,'utf8'))); }
+export async function readState(path,options={}) { return projectRegistryState(await readRawState(path),resolve(path),options); }
 async function replace(temp,path) {
  // Windows readers/scanners can briefly deny replacement. Retry only this
  // same rename under the caller's existing lock, never delete the destination.
@@ -24,8 +27,9 @@ export async function atomicWrite(path, content, exclusive=false) {
  } finally { if(handle) await handle.close(); await unlink(temp).catch(e=>{if(e.code!=='ENOENT') throw e;}); }
 }
 async function locked(path,fn) {
- const lock=`${path}.lock`; const handle=await open(lock,'wx');
- try { return await fn(); } finally { await handle.close(); await unlink(lock); }
+ return withFileLocks([`${path}.lock`],fn);
 }
 export async function initialize(path,state) { validate(state); return locked(path,async()=>{await atomicWrite(path,JSON.stringify(state,null,2)+'\n',true); return state;}); }
-export async function transact(path,expectedVersion,event) { return locked(path,async()=>{const next=evolve(await readState(path),event,expectedVersion); await atomicWrite(path,JSON.stringify(next,null,2)+'\n'); return next;}); }
+export async function transact(path,expectedVersion,event,options={}) {
+ return withStateGuard(path,null,readRawState,async state=>{const next=evolve(state,event,expectedVersion);await atomicWrite(path,JSON.stringify(next,null,2)+'\n');return next;},options);
+}

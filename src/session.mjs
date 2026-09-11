@@ -12,10 +12,11 @@ function memberFor(state,caller) {
 
 // Identity is injected by the caller. This module is not a host authenticator.
 export async function start(path,request,at) {
- shape(request,['teamId','name','caller','source']); validateCaller(request.caller);
+ shape(request,['teamId','name','caller','source','managerMemberId','liaisonMemberId']); validateCaller(request.caller);
+ const {managerMemberId='manager',liaisonMemberId='liaison'}=request;
  const state=createState({teamId:request.teamId,name:request.name,source:request.source,members:[
-  {id:'manager',name:'Manager',role:'Manager',lifecycle:'active',binding:{status:'bound',...request.caller}},
-  {id:'liaison',name:'Liaison',role:'Liaison',lifecycle:'active',binding:{status:'unbound'}}
+  {id:managerMemberId,name:'Manager',role:'Manager',lifecycle:'active',binding:{status:'bound',...request.caller}},
+  {id:liaisonMemberId,name:'Liaison',role:'Liaison',lifecycle:'active',binding:{status:'unbound'}}
  ]},at);
  state.session={invitation:null};
  return initialize(path,validate(state));

@@ -33,6 +33,8 @@ def create_server(
     registry_path: str | Path | None = None,
     index_path: str | Path | None = None,
     state_roots: list[str | Path] | None = None,
+    node_executable: str | Path | None = None,
+    runtime_root: str | Path | None = None,
 ) -> MCPServer:
     """Create one transport instance without initializing or mutating its index."""
 
@@ -41,9 +43,17 @@ def create_server(
             raise ContextError(
                 "INVALID_MODE", "--registry cannot be combined with --index or --state-root"
             )
-        registry: TeamRegistry | ContextRegistry = TeamRegistry(registry_path=registry_path)
+        registry: TeamRegistry | ContextRegistry = TeamRegistry(
+            registry_path=registry_path,
+            node_executable=node_executable,
+            runtime_root=runtime_root,
+        )
         registry_mode = True
     elif index_path is not None and state_roots:
+        if node_executable is not None or runtime_root is not None:
+            raise ContextError(
+                "INVALID_MODE", "Runtime link configuration is only valid with --registry"
+            )
         registry = ContextRegistry(index_path=index_path, state_roots=state_roots)
         registry_mode = False
     else:
@@ -111,6 +121,8 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--registry")
     serve.add_argument("--index")
     serve.add_argument("--state-root", action="append", dest="state_roots")
+    serve.add_argument("--node-executable")
+    serve.add_argument("--runtime-root")
     return parser
 
 
@@ -140,7 +152,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if mode == "registry":
-            server = create_server(registry_path=args.registry)
+            server = create_server(
+                registry_path=args.registry,
+                node_executable=args.node_executable,
+                runtime_root=args.runtime_root,
+            )
         else:
             server = create_server(index_path=args.index, state_roots=args.state_roots)
         server.run("stdio")

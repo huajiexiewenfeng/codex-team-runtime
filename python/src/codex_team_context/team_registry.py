@@ -17,6 +17,7 @@ from .team_policy import POLICY_REVISION, ROLE_DUTIES, SHARED_RULES, onboarding_
 
 
 REGISTRY_SCHEMA_VERSION = 2
+LATEST_REGISTRY_SCHEMA_VERSION = 3
 _ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$")
 _ROLES = {"Manager", "Worker", "Liaison"}
 _ACTIVE_ROLES = {"Worker", "Liaison"}
@@ -39,6 +40,11 @@ _REQUEST_FIELDS = {
     "exit_member": {
         "action", "operation_id", "team_id", "expected_revision", "member_id",
         "authorization_ref",
+    },
+    "adopt_legacy": {
+        "action", "operation_id", "team_id", "team_name", "member_id", "state_path",
+        "expected_state_version", "expected_state_sha256", "members",
+        "authorization_ref", "consent_ref",
     },
 }
 
@@ -122,9 +128,30 @@ def initialize_registry(path: str | os.PathLike[str]) -> None:
 
 
 class TeamRegistry:
-    def __init__(self, *, registry_path: str | os.PathLike[str]) -> None:
-        self.registry_path = Path(registry_path)
-        self._store = RegistryStore(self.registry_path)
+    def __init__(
+        self, *, registry_path: str | os.PathLike[str],
+        node_executable: str | os.PathLike[str] | None = None,
+        runtime_root: str | os.PathLike[str] | None = None,
+    ) -> None:
+        self._store = RegistryStore(registry_path)
+        self.registry_path = self._store.path
+        configured = node_executable is not None or runtime_root is not None
+        if configured and (
+            node_executable is None or runtime_root is None
+            or not Path(node_executable).is_absolute()
+            or not Path(runtime_root).is_absolute()
+        ):
+            _fail(
+                "INVALID_RUNTIME_CONFIG",
+                "node_executable and runtime_root must be paired absolute operator paths",
+            )
+        self.node_executable = node_executable
+        self.runtime_root = runtime_root
+        self.policy_revision = POLICY_REVISION
+
+    def _trusted_runtime(self):
+        from .runtime_link import trusted_paths
+        return trusted_paths(self.node_executable, self.runtime_root)
 
     def read(self, host_id: str, thread_id: str) -> dict[str, Any] | None:
         host_id, thread_id = _caller(host_id, thread_id)
@@ -133,7 +160,15 @@ class TeamRegistry:
         if located is None:
             return None
         team, member = located
-        return self._capsule(registry, team, member)
+        runtime_phase: str | None = None
+        if "runtime" in team:
+            from .runtime_link import invoke_adapter, read_state
+            node, root = self._trusted_runtime()
+            _, state = read_state(Path(team["runtime"]["statePath"]))
+            invoke_adapter(node, root, {"action": "inspect", "state": state})
+            self._validate_link_state(registry, team, state)
+            runtime_phase = state["registry"]["phase"]
+        return self._capsule(registry, team, member, runtime_phase=runtime_phase)
 
     def manage(
         self, actor_host_id: str, actor_thread_id: str, request: dict[str, Any]
@@ -144,6 +179,12 @@ class TeamRegistry:
         # replay comparison.  In particular, JSON booleans/floats must not be
         # accepted as the integer in a historical request by Python equality.
         self._validate_request(request, action)
+
+        if action == "adopt_legacy":
+            from .adoption import adopt
+            return adopt(
+                self, {"hostId": actor_host_id, "threadId": actor_thread_id}, request
+            )
 
         def mutation(registry: Any) -> tuple[dict[str, Any], bool]:
             registry = self._validated(registry)
@@ -179,7 +220,36 @@ class TeamRegistry:
             })
             return result, True
 
-        return self._store.transact(mutation)
+        from .runtime_link import invoke_adapter, read_state, state_locked
+
+        with self._store.locked():
+            registry = self._validated(self._store.read())
+            linked_team = None if action == "bootstrap" else self._team(
+                registry, request["team_id"]
+            )
+            runtime = linked_team.get("runtime") if linked_team is not None else None
+            if runtime is None:
+                result, changed = mutation(registry)
+                if changed:
+                    self._store._replace(registry)
+                return result
+            node, root = self._trusted_runtime()
+            state_path = Path(runtime["statePath"])
+            with state_locked(state_path):
+                _, state = read_state(state_path)
+                invoke_adapter(node, root, {"action": "inspect", "state": state})
+                self._validate_link_state(registry, linked_team, state)
+                if state["registry"]["phase"] != "active":
+                    _fail("MIGRATION_PENDING", "Linked state is still prepared")
+                if action == "exit_member":
+                    invoke_adapter(node, root, {
+                        "action": "check_exit", "state": state,
+                        "memberId": request["member_id"],
+                    })
+                result, changed = mutation(registry)
+                if changed:
+                    self._store._replace(registry)
+                return result
 
     @staticmethod
     def _request_header(request: Any) -> tuple[str, str]:
@@ -207,6 +277,48 @@ class TeamRegistry:
             _identifier(request["member_id"], "member_id", code)
             _text(request["name"], "name", code=code)
             _text(request["authorization_ref"], "authorization_ref", maximum=2048, code=code)
+        elif action == "adopt_legacy":
+            _text(request["team_name"], "team_name", code=code)
+            _identifier(request["member_id"], "member_id", code)
+            _text(request["state_path"], "state_path", maximum=4096, code=code)
+            if not _is_integer(request["expected_state_version"], 0):
+                _fail(code, "expected_state_version must be a nonnegative integer")
+            digest = request["expected_state_sha256"]
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                _fail(code, "expected_state_sha256 must be lowercase SHA-256")
+            if not isinstance(request["members"], list) or not request["members"]:
+                _fail(code, "members must be the complete nonempty source roster")
+            seen_ids: set[str] = set()
+            seen_bindings: set[tuple[str, str]] = set()
+            managers = liaisons = 0
+            for member in request["members"]:
+                if not isinstance(member, dict) or set(member) != {
+                    "id", "name", "role", "lifecycle", "binding"
+                }:
+                    _fail(code, "adopted member fields must match the Node roster schema")
+                member_id = _identifier(member["id"], "members.id", code)
+                _text(member["name"], "members.name", code=code)
+                if member_id in seen_ids:
+                    _fail(code, "adopted member ids must be unique")
+                seen_ids.add(member_id)
+                role = member["role"]
+                if role not in _ROLES or member["lifecycle"] not in _LIFECYCLES:
+                    _fail(code, "adopted member role or lifecycle is invalid")
+                managers += role == "Manager"
+                liaisons += role == "Liaison"
+                binding = member["binding"]
+                if not isinstance(binding, dict) or set(binding) != {"status", "hostId", "threadId"}:
+                    _fail(code, "adopted members must have exact bound bindings")
+                if binding["status"] != "bound":
+                    _fail(code, "adopted members must all be bound")
+                identity = _caller_stored(binding["hostId"], binding["threadId"], code)
+                if identity in seen_bindings:
+                    _fail(code, "adopted member bindings must be unique")
+                seen_bindings.add(identity)
+            if managers != 1 or liaisons != 1:
+                _fail(code, "adopted roster requires exactly one Manager and Liaison")
+            _text(request["authorization_ref"], "authorization_ref", maximum=2048, code=code)
+            _text(request["consent_ref"], "consent_ref", maximum=2048, code=code)
         elif action == "register_member":
             if not _is_integer(request["expected_revision"], 1):
                 _fail(code, "expected_revision must be a positive integer")
@@ -381,7 +493,8 @@ class TeamRegistry:
         return None
 
     def _capsule(
-        self, registry: dict[str, Any], team: dict[str, Any], member: dict[str, Any]
+        self, registry: dict[str, Any], team: dict[str, Any], member: dict[str, Any],
+        *, runtime_phase: str | None = None,
     ) -> dict[str, Any]:
         leader = self._member(team, team["leaderMemberId"])
         current_receipt = onboarding_receipt(
@@ -401,7 +514,7 @@ class TeamRegistry:
         capsule = {
             "status": "active" if member["lifecycle"] == "active" else "inactive",
             "registryId": registry["registryId"],
-            "registrySchemaVersion": REGISTRY_SCHEMA_VERSION,
+            "registrySchemaVersion": registry["schemaVersion"],
             "policyRevision": POLICY_REVISION,
             "team": {"id": team["id"], "name": team["name"], "revision": team["revision"]},
             "member": {
@@ -420,6 +533,17 @@ class TeamRegistry:
             "dispatchAllowed": False,
             "identityAssurance": "caller-declared",
         }
+        runtime = team.get("runtime")
+        if runtime is not None:
+            capsule["runtime"] = {
+                "statePath": runtime["statePath"], "migrationId": runtime["migrationId"],
+                "phase": runtime_phase, "teamRevision": team["revision"],
+                "runtimeRoot": str(Path(self.runtime_root).resolve()),
+                "pythonExecutable": os.path.abspath(os.sys.executable),
+            }
+            capsule["executionIntegration"] = (
+                "connected" if runtime_phase == "active" else "migration-pending"
+            )
         if member["lifecycle"] == "active":
             capsule.update({
                 "sharedRules": list(SHARED_RULES),
@@ -467,8 +591,9 @@ class TeamRegistry:
         if not isinstance(value, dict) or set(value) != {
             "schemaVersion", "registryId", "policyRevision", "teams", "operations"
         }:
-            _fail("REGISTRY_CORRUPT", "Registry root fields do not match schema v2")
-        if value["schemaVersion"] != REGISTRY_SCHEMA_VERSION or isinstance(value["schemaVersion"], bool):
+            _fail("REGISTRY_CORRUPT", "Registry root fields do not match the schema")
+        schema = value["schemaVersion"]
+        if schema not in {REGISTRY_SCHEMA_VERSION, LATEST_REGISTRY_SCHEMA_VERSION} or isinstance(schema, bool):
             _fail("REGISTRY_CORRUPT", "Unsupported registry schemaVersion")
         _identifier(value["registryId"], "registryId", "REGISTRY_CORRUPT")
         if (
@@ -483,10 +608,12 @@ class TeamRegistry:
         member_ids: set[str] = set()
         bindings: set[tuple[str, str]] = set()
         for team in value["teams"]:
-            self._validate_team(team, team_ids, member_ids, bindings)
+            self._validate_team(team, team_ids, member_ids, bindings, schema)
         operation_ids: set[str] = set()
         for operation in value["operations"]:
             self._validate_operation(operation, operation_ids)
+            if schema == 2 and operation["request"]["action"] == "adopt_legacy":
+                _fail("REGISTRY_CORRUPT", "Schema-2 Registry cannot contain adoption history")
         self._validate_history(value)
         return value
 
@@ -540,6 +667,54 @@ class TeamRegistry:
                 teams[team_id] = team
                 member_ids.add(manager["id"])
                 bindings.add(binding)
+                continue
+
+            if action == "adopt_legacy":
+                if team_id in teams or result["teamRevision"] != 1:
+                    _fail("REGISTRY_CORRUPT", "Invalid ordered adoption history")
+                source_manager = next(
+                    (member for member in request["members"]
+                     if member["id"] == request["member_id"]),
+                    None,
+                )
+                if (
+                    source_manager is None
+                    or source_manager["role"] != "Manager"
+                    or source_manager["lifecycle"] != "active"
+                    or actor != {
+                        "hostId": source_manager["binding"]["hostId"],
+                        "threadId": source_manager["binding"]["threadId"],
+                    }
+                ):
+                    _fail("REGISTRY_CORRUPT", "Stored adoption actor is not the source Manager")
+                imported = []
+                for source_member in request["members"]:
+                    binding = source_member["binding"]
+                    identity = (binding["hostId"], binding["threadId"])
+                    if source_member["id"] in member_ids or identity in bindings:
+                        _fail("REGISTRY_CORRUPT", "Stored adoption reuses an identity")
+                    imported.append({
+                        "id": source_member["id"], "name": source_member["name"],
+                        "role": source_member["role"],
+                        "binding": {"hostId": binding["hostId"], "threadId": binding["threadId"], "revision": 1},
+                        "lifecycle": source_member["lifecycle"],
+                        "onboarding": {"status": "pending", "evidenceRef": None, "confirmedReceipt": None},
+                        "authorizationRef": request["authorization_ref"],
+                        "consentRef": request["consent_ref"] if source_member["role"] == "Liaison" else None,
+                    })
+                    member_ids.add(source_member["id"])
+                    bindings.add(identity)
+                team = {
+                    "id": team_id, "name": request["team_name"], "revision": 1,
+                    "leaderMemberId": request["member_id"], "members": imported,
+                    "runtime": {
+                        "statePath": request["state_path"], "migrationId": request["operation_id"],
+                        "sourceVersion": request["expected_state_version"],
+                        "sourceSha256": request["expected_state_sha256"],
+                    },
+                }
+                reconstructed.append(team)
+                teams[team_id] = team
                 continue
 
             team = teams.get(team_id)
@@ -615,11 +790,15 @@ class TeamRegistry:
         team_ids: set[str],
         member_ids: set[str],
         bindings: set[tuple[str, str]],
+        schema: int,
     ) -> None:
-        if not isinstance(team, dict) or set(team) != {
-            "id", "name", "revision", "leaderMemberId", "members"
-        }:
+        fields = {"id", "name", "revision", "leaderMemberId", "members"}
+        if schema == 3 and isinstance(team, dict) and "runtime" in team:
+            fields.add("runtime")
+        if not isinstance(team, dict) or set(team) != fields:
             _fail("REGISTRY_CORRUPT", "Invalid team record shape")
+        if schema == 2 and "runtime" in team:
+            _fail("REGISTRY_CORRUPT", "Schema-2 team cannot contain a runtime link")
         team_id = _identifier(team["id"], "team.id", "REGISTRY_CORRUPT")
         if team_id in team_ids:
             _fail("REGISTRY_CORRUPT", "Duplicate team id")
@@ -688,6 +867,20 @@ class TeamRegistry:
                 _fail("REGISTRY_CORRUPT", "Only Liaison records may contain consentRef")
         if managers != 1 or liaisons > 1 or not leader_found:
             _fail("REGISTRY_CORRUPT", "Team requires one exact Manager leader and at most one Liaison")
+        if "runtime" in team:
+            runtime = team["runtime"]
+            if not isinstance(runtime, dict) or set(runtime) != {
+                "statePath", "migrationId", "sourceVersion", "sourceSha256"
+            }:
+                _fail("REGISTRY_CORRUPT", "Invalid runtime link shape")
+            path = runtime["statePath"]
+            if not isinstance(path, str) or not Path(path).is_absolute() or Path(path) != Path(path).resolve():
+                _fail("REGISTRY_CORRUPT", "Runtime statePath must be absolute and canonical")
+            _identifier(runtime["migrationId"], "runtime.migrationId", "REGISTRY_CORRUPT")
+            if not _is_integer(runtime["sourceVersion"], 0):
+                _fail("REGISTRY_CORRUPT", "Invalid runtime sourceVersion")
+            if not isinstance(runtime["sourceSha256"], str) or re.fullmatch(r"[0-9a-f]{64}", runtime["sourceSha256"]) is None:
+                _fail("REGISTRY_CORRUPT", "Invalid runtime sourceSha256")
 
     def _validate_operation(self, operation: Any, seen: set[str]) -> None:
         if not isinstance(operation, dict) or set(operation) != {
@@ -724,7 +917,7 @@ class TeamRegistry:
         if (
             not _is_integer(result["teamRevision"], 1)
             or not isinstance(result["outcome"], str)
-            or result["outcome"] not in {"bootstrapped", "registered", "ready", "exited"}
+            or result["outcome"] not in {"bootstrapped", "registered", "ready", "exited", "adopted"}
         ):
             _fail("REGISTRY_CORRUPT", "Invalid stored operation result")
         expected_outcome = {
@@ -732,6 +925,7 @@ class TeamRegistry:
             "register_member": "registered",
             "confirm_ready": "ready",
             "exit_member": "exited",
+            "adopt_legacy": "adopted",
         }[request["action"]]
         if (
             result["teamId"] != request["team_id"]
@@ -739,6 +933,45 @@ class TeamRegistry:
             or result["outcome"] != expected_outcome
         ):
             _fail("REGISTRY_CORRUPT", "Stored request and result relationships disagree")
+
+    def _export_from_validated(self, registry: dict[str, Any], team_id: str) -> dict[str, Any]:
+        team = self._team(registry, team_id)
+        runtime = team.get("runtime")
+        if runtime is None:
+            _fail("TEAM_NOT_LINKED", "Team has no linked runtime")
+        leader = self._member(team, team["leaderMemberId"])
+        members = [{
+            "id": member["id"], "name": member["name"], "role": member["role"],
+            "lifecycle": member["lifecycle"],
+            "binding": {"status": "bound", "hostId": member["binding"]["hostId"],
+                        "threadId": member["binding"]["threadId"]},
+        } for member in team["members"]]
+        ready = [member["id"] for member in team["members"]
+                 if member["lifecycle"] == "active"
+                 and self._effective_onboarding_status(registry, team, member, leader) == "ready"]
+        return {"registryId": registry["registryId"], "teamId": team["id"],
+                "teamRevision": team["revision"], "migrationId": runtime["migrationId"],
+                "statePath": runtime["statePath"], "members": members,
+                "readyMemberIds": ready}
+
+    def _validate_link_state(
+        self, registry: dict[str, Any], team: dict[str, Any], state: dict[str, Any]
+    ) -> None:
+        link = state.get("registry")
+        runtime = team["runtime"]
+        if (
+            state.get("schemaVersion") != 2 or not isinstance(link, dict)
+            or link.get("registryId") != registry["registryId"]
+            or Path(link.get("registryPath", "")).resolve() != self.registry_path.resolve()
+            or link.get("teamId") != team["id"]
+            or link.get("migrationId") != runtime["migrationId"]
+            or link.get("sourceVersion") != runtime["sourceVersion"]
+            or link.get("sourceSha256") != runtime["sourceSha256"]
+            or link.get("phase") not in {"prepared", "active"}
+            or not _is_integer(link.get("teamRevision"), 0)
+            or link["teamRevision"] > team["revision"]
+        ):
+            _fail("RUNTIME_LINK_MISMATCH", "Linked state does not match Registry authority")
 
 
 def _caller_stored(host_id: Any, thread_id: Any, code: str) -> tuple[str, str]:

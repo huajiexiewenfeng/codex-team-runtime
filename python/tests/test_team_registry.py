@@ -69,7 +69,7 @@ def test_initialize_bootstrap_and_manager_capsule(registry):
     initial = json.loads(path.read_text(encoding="utf-8"))
     assert set(initial) == {"schemaVersion", "registryId", "policyRevision", "teams", "operations"}
     assert initial["schemaVersion"] == 2
-    assert initial["policyRevision"] == 1
+    assert initial["policyRevision"] == 2
     assert initial["teams"] == [] and initial["operations"] == []
 
     receipt = bootstrap(store)
@@ -417,6 +417,10 @@ def test_old_policy_registry_is_readable_but_ready_member_requires_reconfirmatio
     registry, monkeypatch
 ):
     store, path = registry
+    monkeypatch.setattr(team_registry_module, "POLICY_REVISION", 1)
+    old_value = json.loads(path.read_text(encoding="utf-8"))
+    old_value["policyRevision"] = 1
+    path.write_text(json.dumps(old_value), encoding="utf-8")
     bootstrap(store)
     store.manage("host-manager", "thread-manager", member_request())
     old_capsule = store.read("host-worker", "thread-worker")
