@@ -76,6 +76,21 @@ export function planSubmissionReview(state, caller, notice) {
   return { ...base, action: 'review' };
 }
 
+export function pendingSubmissions(state, caller) {
+  validate(state);
+  validateCaller(caller);
+  const manager = state.members.find(m => m.role === 'Manager');
+  check(manager?.lifecycle === 'active' && manager.binding.status === 'bound' &&
+    isDeepStrictEqual(caller, identity(manager)), 'Only current Manager may query pending submissions');
+  const notices = state.tasks.filter(t => t.status === 'submitted' &&
+    state.rounds.find(r => r.id === t.roundId)?.status === 'open').map(task => {
+    const ctx = context(state, task.id);
+    return makeNotice(state, ctx, ctx.submissions.at(-1));
+  });
+  return { sourceVersion: state.version, notices, readOnly: true,
+    identityAssurance: 'caller-declared', hostActionExecuted: false };
+}
+
 export async function receiveSubmissionNotice({ statePath, caller, notice, eventId, expectedVersion, at = new Date().toISOString() }) {
   check(Number.isSafeInteger(expectedVersion) && expectedVersion >= 0, 'Invalid expectedVersion');
   const state = await readState(statePath);

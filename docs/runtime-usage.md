@@ -27,13 +27,23 @@ node src/cli.mjs dashboard <state.json> <new-output-directory> [asOf] [--codex-l
 
 完整导出包含与各页对应的 `snapshot.json` / `round-N.json`，以及最后写入的 `READY.json`。该标记记录源版本、asOf、页面对应的 roundId / snapshotId、renderOptions 与 HTML / JSON 文件 SHA-256；它证明导出完整性，不证明 Worker 交付质量或宿主状态。移动或分享时应保留整个文件夹；输出含本地任务及证据摘要，请按项目资料保护，不自动发布到公网。
 
-导出必须使用新目录；重复目标拒绝覆盖。需要新进展时重新运行并选新目录，不会修改原状态、启用报告或唤醒任何任务。实时刷新、模型 / Token 采集尚未接入。最新本机版本的窄屏、筛选 / 展开 / 键盘与成员正确跳转已由用户确认正常，见 [HTML 验收记录](dashboard-validation.md)；自动测试只证明其覆盖的输出与状态语义，不替代其他环境的实测。
+导出必须使用新目录；重复目标拒绝覆盖。离线快照需要新进展时重新运行并选新目录，不会修改原状态、启用报告或唤醒任何任务。需要随记录变化的最新入口，使用下文 `dashboard-serve`；模型 / Token 采集仍未接入。静态本机版本的窄屏、筛选 / 展开 / 键盘与成员正确跳转已由用户确认正常，见 [HTML 验收记录](dashboard-validation.md)；该历史验收不是新服务的测试证据。
 
 成员对话入口默认禁用。可在命令末尾显式添加 `--codex-links`，为非模拟来源、已绑定本机 `local` 且 threadId 为受支持 UUID 的成员生成 `codex://threads/{threadId}` 兼容链接。模拟 / 未知来源、远程、未绑定、创建中、绑定缺失和异常 ID 仍不生成链接。历史页使用历史绑定。
 
 该选项仅改变 HTML 呈现，并记录为 `READY.json` 的 `renderOptions.codexLinks`；不会改写 snapshot 的宿主能力判断或真实状态。重现 HTML 时使用 `render(snapshot, {roundPages: manifest.pages, ...manifest.renderOptions})`。旧清单没有 renderOptions 时仍采用默认禁用。
 
 这是需在使用环境核对的兼容方式：本机客户端按线程 ID 查找，URL 的 `hostId` 参数不能保证主机定位，因此链接不附带该参数；已移动或多主机同 ID 的任务不能靠此入口锁定原主机。当前环境的正确跳转已有用户确认，其他浏览器可能要求确认或不支持该协议；请核对打开后的成员身份。它不是网页调用 Agent 导航工具的 API，也不发送提示词。严格宿主导航仍待接入，详见 [导航核对记录](design/codex-navigation.md)。
+
+### 自动同步的最新工作台
+
+```text
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links]
+```
+
+只监听本机，前台运行，Ctrl+C 停止。使用命令返回的完整启动链接；schema 2 按原 Registry 配置提供本次进程的 `CODEX_TEAM_CONTEXT_PYTHON`。页面可见时约每 5 秒请求当前 Node + Registry 投影，隐藏 / 暂停 / 关闭后停止新请求。无 Agent 唤醒、无后台扫描、无业务写入。断连保留上次成功视图并警告；服务重启需要新的启动链接。默认端口 4319，`--port 0` 可为多团队分配空闲端口。
+
+Manager 与 Worker 仍须按已有契约记录真实进展、提交和验收，Liaison 只读解释；自动刷新不等于原生 Agent 遥测。离线导出保持不变。完整职责、安全边界与验收方法见 [最新工作台与历史快照](live-dashboard.md)。
 
 ## 持久化 CLI
 
@@ -116,7 +126,7 @@ Manager 在自己的调用上下文登记邀请（假定当前版本 0）：
 全新、尚未登记且没有旧状态或未决创建证据的团队，按以下顺序执行：
 
 1. 核对当前 Manager 身份和安装版本，保存本次启用引用、唯一 team/member IDs、原始 state 路径及创建结果。`start` 使用可选 `managerMemberId` / `liaisonMemberId`，一次创建真实的新 state，不覆盖已有文件。
-2. 通过宿主创建或复用已核实且属于本次团队的独立 Liaison / Worker，按 Skill 命名与模型规则配置；pending ID 必须先解析。初始消息只交接入队身份与公共契约，不分派业务开发。
+2. 先按[启动回执与恢复](startup-recovery.md)用 `team_context.startup` 为所有缺少成员 `prepare`，每次新建前 `claim`；只在本次返回 `claimed:true` 后创建一次。通过宿主创建或复用已核实且属于本次团队的独立 Liaison / Worker，按 Skill 命名与模型规则配置；保留 pending 返回，初始消息携带 operation/team/member/role，要求成员自核验并发布启动回执。Manager 从 `plan` 找回候选正式 ID、原生独立核验后 `verify`。初始消息不分派业务开发。
 3. Manager `attach invite`，真实 Liaison 从自己的上下文 `attach confirm`；Manager `register-worker` 登记真实 Worker。此时保持零业务轮次、零任务、汇报关闭。
 4. 按 [Registry cutover 协议](team-registry-cutover.md) 对**同一份实际 state**调用 `adopt_legacy`，传入最新 version / SHA、完整名册、启用授权与真实配对证据。这个组合不先调用 `bootstrap`，因为已登记的同一团队/身份不能再次导入。
 5. 三个成员各自 `team_context.read`，Manager 核对其各自回执并 `confirm_ready`；重新读取验证三成员 ready、同一 leader、runtime connected。`dispatchAllowed:false` 仍表示召回本身不授权派工。只有已有明确业务任务且通过 admission 后才开轮、入队、派发；仅设置团队则待命。
@@ -232,7 +242,7 @@ Worker 先在自己的已核对身份和写入授权下，用现有 `apply` 记�
 
 `notificationId` 是规范通知内容的 SHA-256，仅作稳定关联标识，不是签名或身份认证。`submissionVersion` 指 submit 事件对应的版本，不随汇报偏好等无关变化而改变；返工后的新 submit 得到新通知。任意团队/事件来源含 fixture 时 `hostRequest=null`，仅用于本地验证。
 
-宿主中的 Worker 核对自己的真实身份、当前状态及精确 Manager 目标后，在已授权协作范围内用原生 `send_message_to_thread` 调用非空的 `hostRequest`（hostId、threadId、prompt），保留实际工具结果。无需覆写 Manager 模型。计划不是已发送回执；工具返回也不证明 Manager 已完成审查。失败或结果不明时保留不确定性，先核对原工具证据/Manager 状态，不盲目重发或创建后台轮询。当前没有持久化发件箱、自动重试或“外部消息恰好一次”保证。
+宿主中的 Worker 核对自己的真实身份、当前状态及精确 Manager 目标后，在已授权协作范围内通过原生 `send_message_to_thread` 回报，无需覆写 Manager 模型。发送前使用[发送记录与前台有界恢复](submission-recovery.md)的 `notice-track` / `notice-claim`，发送后用 `notice-result` 记录实际工具结果；`notice-plan` 负责判定对账、停止或冷却。计划不是已发送回执；工具返回也不证明 Manager 已完成审查。只有已确证未接收、不能迟到的暂时故障允许前台重试，最多三次；unknown 先对账，policy-denied 不自动重试。没有后台发件服务或“外部消息恰好一次”保证。Manager 可用 `pending-submissions` 只读取回权威待审 notice，再走下述接收流程，不要求用户搬运，也不会自动唤醒 idle Manager。
 
 Manager 在自己的独立任务上下文核对身份，使用原先可信的 runtime/state 路径；不能接受消息提供的新状态路径作为权威。将通知 JSON 本身（计划中的 **notice 字段**，不是整个计划）保存到自己获准写入的目录，再执行 `receive-submission`。`expectedVersion` 使用**当前读取的 state.version**，不是 notice.submissionVersion；eventId 是新的唯一审查事件 ID，at 为当前规范 UTC 时间。接收器验证整个通知与本地真实提交一致，只有最新 submitted 任务会写入 Manager 的 review 事件，进入 reviewing。它不冒充 Worker，不验收通过，不改变汇报偏好或操作宿主。
 

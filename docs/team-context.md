@@ -13,7 +13,7 @@ Node 经检查投影，保留原业务历史。`dispatchAllowed` 始终 false，
 
 | 模式 | 权威及工具 | 边界 |
 | --- | --- | --- |
-| `--registry`，schema 2/3 | Registry 管当前登记身份；`team_context.read` / `team_context.manage` | 未链接时仅召回；显式迁入后提供定位与 Node 检查投影，业务历史仍由 Node 管理 |
+| `--registry`，schema 2/3 | Registry 管登记身份；`team_context.read` / `team_context.manage`；配置可信运行路径后另有 `team_context.startup` | 启动回执独立保存，不授予身份；显式迁入后提供定位与 Node 检查投影，业务历史仍由 Node 管理 |
 | `--index`，v1 | Node 管身份；仅 `team_context.read` | 读取已有 locator；不再暴露早期缺少 Manager actor 区分的 register 工具 |
 
 不能把同一真实团队同时交给两种权威，也不能用旧运行层写入绕过 Registry 错误。
@@ -62,6 +62,10 @@ codex-team-context serve --index <原-index.json> --state-root <允许的原状�
 src、Skill 与 docs 布局；不包含团队状态或 Registry。配置及恢复步骤见迁入指南。
 
 ## Read：精确匹配、无副作用
+
+新成员创建前的持久占位、成员自身启动回执及 Manager 初始化恢复计划，见
+[启动回执与恢复](startup-recovery.md)。它与正式登记、配对和 readiness 分离；
+回执已经写入但未登记时，下面的 read 仍返回 null。
 
 ```json
 {"host_id":"local","thread_id":"<当前独立任务的精确 threadId>"}

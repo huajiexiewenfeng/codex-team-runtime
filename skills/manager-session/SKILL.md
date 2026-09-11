@@ -25,6 +25,11 @@ This prints the canonical runtime snapshot without writing files or invoking hos
 
 ## Team context recall — all formal members
 
+Before new member creation or pending client-ID recovery, use activation.md's
+durable startup receipt flow. `team_context.startup` stores candidates separately
+from membership; Manager independently verifies them. Missing task-list entries
+or unreadable final replies do not authorize another creation.
+
 Manager, Liaison and Workers share [the team-context contract](references/team-context.md): recover own identity, team, exact leader and role duties, not only a role label. Read that reference for onboarding, foreground continuation/context loss, delivery or acceptance, stale/conflicting context, or membership maintenance. New formal-member handoffs carry this same reference and verified read arguments; reading it in Manager does not load it in other tasks.
 
 Use `team_context.read` with verified **current hostId + threadId**; temporary helpers must not inherit a parent's role identity. Active context does not grant work authorization; null is unregistered, inactive is not a resumable role, and errors are not null. Current work/evidence needs its own verified source. MCP does not call itself or authenticate the caller.
@@ -51,7 +56,7 @@ For an explicitly requested correction of a confirmed **unlinked legacy** Liaiso
 
 - **Status/history and Liaison:** read snapshots only. Liaison explains evidence and discusses decisions with the user; it does not command Workers or write Manager state. A durable command inbox is not implemented.
 - **Explicit activation, pairing, role recovery, Worker registration, supervision, acceptance or exit:** read [references/operations.md](references/operations.md) and the selected runtime's `docs/runtime-usage.md`. Unlinked legacy `start` creates local role records only; Manager invites and the target Liaison confirms from its own context using `attach`. Linked membership uses MCP, not these identity commands. Legacy `resume` returns guidance without mutation; linked recall uses the shared team-context contract. Missing dependencies or unverifiable current identity stop identity-dependent operations, not ordinary status reads.
-- **HTML export:** existing `snapshot`/`render` commands create a new output directory only when requested. They do not start a live server.
+- **HTML workbench / stale Dashboard:** follow [Dashboard operation and ownership](references/dashboard.md). `dashboard-serve` provides the user-requested local latest view; visible-browser refresh is deterministic, not an Agent timer. `dashboard`/`snapshot`/`render` retain new-directory-only offline exports. Plain status queries do not start services. Manager/Workers maintain authorized records; Liaison explains the view without writing Manager state.
 - **Manager supervision pass:** use the executable `supervision-plan` in operations.md to select active Worker targets, then invoke available native tools within authorization. A generated plan is not an executed query; raw host results require review, never automatic acceptance.
 - **Worker submission / Manager receipt:** read [submission notices](references/operations.md#submission-notices) for the executable `submission-notice` / `receive-submission` flow. It starts review from a verified durable submission, not approval or background monitoring.
 - **Reporting coordination records:** read the companion checkout's `docs/reporting-usage.md` for `reporting-init`, `reporting-plan` and `reporting-apply`. These manage a local operation ledger only; they do not create or stop automation. Uncertain outcomes require reconciliation, not repeated creation.
