@@ -3,7 +3,8 @@
 Use when the user explicitly designates the current independent session as
 Manager or authorizes a new team. Status, a Skill mention, a title change and
 ordinary continuation do not create a team. This routing is a foreground Skill
-procedure, not an automatic hook or a new MCP API.
+procedure backed by the startup receipt API, not an automatic hook or atomic
+initialize-team operation.
 
 ## 1. Establish intent and inspect without mutation
 
@@ -82,17 +83,30 @@ This uses the actual newly created state, not a fabricated migration fixture.
    `<teamId>-worker-1`; set `managerMemberId` and `liaisonMemberId` in `start`.
    Do not reuse IDs from example JSON or change IDs after a conflicting result.
 2. Run `start` once as the verified current Manager. It creates records only.
+   Before new native creation, read `<runtime-root>/docs/startup-recovery.md` and
+   verify `team_context.startup` is available in the configured service. Prepare
+   all missing intended member slots with immutable operation IDs; retain them
+   in the original activation reference. For each slot, `claim` immediately before
+   native creation. Only this call's `claimed:true` permits that one authorized
+   create; a lost response or `claimed:false` requires reconciliation.
    With host permission to create independent tasks, create the missing Liaison
    and Worker using native tools, the model/naming policy in operations.md and
    the correct project environment. They are not temporary collaboration
    helpers. If the host requires an additional explicit creation request, obtain
    that permission; never bypass it with another tool. Retain each creation
-   result before the next side effect. Resolve pending client IDs, never bind
-   them or retry creation while the outcome is unknown.
+   result before the next side effect and use `record_creation` for its native
+   identity. Resolve pending client IDs using the original slot's own receipts
+   and independent native verification; never bind client IDs or retry creation
+   while the outcome is unknown. If this API is unavailable, report the installed
+   capability gap before creating new windows; do not self-install.
 3. Initial prompts are onboarding-only: exact Manager/team identity, original
-   state and shared contract paths, own identity verification, and no business
-   work yet. Manager issues the real Liaison invite; that Liaison confirms from
-   its own independent context. Manager registers the verified Worker. Respect
+   state and shared contract paths, **startup operationId, memberId and role**,
+   own identity verification, and no business work yet. Require the new member
+   to publish its own `team_context.startup` `receipt` before formal registration;
+   null context is expected. Manager reads `plan`, independently checks the exact
+   candidate with native `read_thread`, then `verify`. A startup receipt is neither
+   registration nor consent. Manager issues the real Liaison invite; that Liaison
+   confirms from its own independent context. Manager registers the verified Worker. Respect
    each task's file permissions; never confirm on behalf of a member.
 4. Inspect the original state and native results: exactly the intended bound
    minimum members, confirmed pairing, no open rounds/tasks/reports. Use
@@ -108,6 +122,12 @@ a foreground, multi-step Skill workflow, not an atomic initialize-team MCP tool.
 The default minimum team is complete only with three resolved native windows,
 correct bindings, connected runtime and all three ready. If interrupted, report
 the exact partial stage and resume that same attempt; do not delete or rebuild.
+On recovery, `team_context.startup` with `{"action":"plan"}` finds recorded
+operations for the verified current Manager even when task lists or final reply
+reads are empty. Query during foreground continuation, not a polling loop. Errors
+are not absence; lost ledger data needs original evidence, not a replacement
+operation. Older attempts without startup records use saved creation evidence
+and known formal IDs, not a fabricated claim.
 
 `bootstrap` creates identity-only registration (`not-connected`); do not run it
 first for this executable setup, because adoption rejects an existing Registry

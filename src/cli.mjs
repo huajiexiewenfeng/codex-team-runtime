@@ -59,6 +59,25 @@ export async function run(args,output=console.log) {
    const {receiveSubmissionNotice}=await import('./submission-notice.mjs');
    output(JSON.stringify(await receiveSubmissionNotice({statePath:a[0],caller:await json(a[1]),notice:await json(a[2]),eventId:a[3],expectedVersion:Number(a[4]),at:a[5]??now()}),null,2));break;
   }
+  case 'pending-submissions': {
+   if(a.length!==2) throw new Error('pending-submissions <state.json> <manager-caller.json>');
+   const {pendingSubmissions}=await import('./submission-notice.mjs');
+   output(JSON.stringify(pendingSubmissions(await readState(a[0]),await json(a[1])),null,2));break;
+  }
+  case 'notice-plan': {
+   if(a.length<3||a.length>4) throw new Error('notice-plan <state.json> <caller.json> <notice.json> [at]');
+   const {planNoticeDelivery}=await import('./submission-recovery.mjs');
+   output(JSON.stringify(await planNoticeDelivery({statePath:a[0],caller:await json(a[1]),notice:await json(a[2]),at:a[3]??now()}),null,2));break;
+  }
+  case 'notice-track': case 'notice-claim': case 'notice-result': {
+   if(a.length!==2) throw new Error(`${command} <state.json> <request.json>`);
+   const {trackSubmissionNotice,claimNoticeDelivery,recordNoticeResult}=await import('./submission-recovery.mjs');
+   const operation={'notice-track':trackSubmissionNotice,'notice-claim':claimNoticeDelivery,'notice-result':recordNoticeResult}[command];
+   const request=await json(a[1]);
+   // Never accept executable projection/transport options or a path override from JSON.
+   const {caller,notice,expectedVersion,expectedLedgerVersion,baseline,attemptId,result,at}=request;
+   output(JSON.stringify(await operation({statePath:a[0],caller,notice,expectedVersion,expectedLedgerVersion,baseline,attemptId,result,at:at??now()}),null,2));break;
+  }
   case 'reporting-init': {
    if(a.length<3||a.length>4) throw new Error('reporting-init <state.json> <new-ledger.json> <caller.json> [at]');
    const {initReporting}=await import('./reporting-store.mjs');
@@ -91,9 +110,27 @@ export async function run(args,output=console.log) {
    const manifest=await exportDashboard(await readState(values[0]),resolve(values[1]),values[2]??now(),{codexLinks});
    output(`Read-only dashboard v${manifest.sourceVersion}: ${resolve(a[1],'index.html')} (${manifest.pages.length} pages)`);break;
   }
+  case 'dashboard-serve': {
+   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links]';
+   if(!a[0]||a[0].startsWith('--'))throw new Error(usage);
+   let port=4319,codexLinks=false,seenPort=false;
+   for(let i=1;i<a.length;i++){
+    if(a[i]==='--codex-links'&&!codexLinks){codexLinks=true;continue;}
+    if(a[i]==='--port'&&!seenPort&&/^\d+$/.test(a[i+1]??'')){seenPort=true;port=Number(a[++i]);continue;}
+    throw new Error(usage);
+   }
+   const {startDashboardServer}=await import('./dashboard-live.mjs');
+   const service=await startDashboardServer({statePath:a[0],port,codexLinks});
+   output(`Read-only latest workbench: ${service.url}\nVisible page checks every 5 seconds; no Agent wakeups. Ctrl+C stops this local service.`);
+   return service;
+  }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, init, apply, snapshot, render, dashboard, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{
+ if(!service?.close)return;
+ const stop=()=>{void service.close().catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});};
+ process.once('SIGINT',stop);process.once('SIGTERM',stop);
+}).catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});

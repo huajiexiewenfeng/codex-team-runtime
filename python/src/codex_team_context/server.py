@@ -14,6 +14,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from .core import ContextError, ContextRegistry, initialize_index
 from .team_registry import TeamRegistry, initialize_registry
+from .startup import StartupLedger
 
 
 def _json_result(value: Any, *, is_error: bool = False) -> CallToolResult:
@@ -105,6 +106,27 @@ def create_server(
                 )
             except ContextError as exc:
                 return _json_result(exc.as_dict(), is_error=True)
+
+        if node_executable is not None and runtime_root is not None:
+            startup_ledger = StartupLedger(team_registry)
+
+            @server.tool(
+                name="team_context.startup",
+                description=(
+                    "Recover authorized member startup: Manager prepares/claims creation, "
+                    "records results, verifies candidate identities or reads a plan; "
+                    "members publish their own receipt. Never registers or dispatches."
+                ),
+                annotations=ToolAnnotations(
+                    readOnlyHint=False, destructiveHint=False,
+                    idempotentHint=True, openWorldHint=False,
+                ),
+            )
+            def startup(actor_host_id: str, actor_thread_id: str, request: dict[str, Any]) -> CallToolResult:
+                try:
+                    return _json_result(startup_ledger.handle(actor_host_id, actor_thread_id, request))
+                except ContextError as exc:
+                    return _json_result(exc.as_dict(), is_error=True)
 
     return server
 

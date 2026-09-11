@@ -17,7 +17,7 @@ Skill-driven team coordination for Codex
 | 业务运行层 | 持久轮次/任务、FIFO 队列、占用保护、提交与独立验收、投递恢复 | 不保证原生消息恰好一次送达，不支持已启动任务的强制抢占与重新分配 |
 | 长期角色记忆 | Python MCP + Team Registry；全员精确身份召回、Manager 登记与回执确认 | MCP 不主动触发；跨月、多次自然压缩后的召回率仍待验证 |
 | Registry 运行接入 | 本地 cutover 增量连接当前身份与 Node 业务状态，保留历史；一键升级团队两名正式成员已迁入并本人确认 | 不自动迁入其他团队，不代表所有窗口已加载新版；新版真实 Worker 完整闭环仍需测试 |
-| HTML 工作台 | 同源只读快照、筛选、轮次历史、成员、历时与交付证据 | 不实时刷新、不派工；未自动采集 Token/费用 |
+| HTML 工作台 | 本机只读最新入口按页面请求同步 Node + Registry；保留离线快照、筛选、轮次、成员与证据 | 不派工、不唤醒 Agent；不是原生实时遥测，未自动采集 Token/费用 |
 | 监督与汇报 | Worker 通知、前台有界检查、汇报操作账本；旧版已有现场闭环证据 | 非常驻调度器；无人值守停报、自动收件箱及强制到期宿主接入尚未完整交付 |
 
 本地安装、MCP 连接加载、成员本人恢复和自然召回成功是不同结果，不能相互替代。阶段性验证见下文，不能将旧版本测试直接当作新版全链路通过。
@@ -26,7 +26,7 @@ Skill-driven team coordination for Codex
 
 ![Manager Session Runtime 总体架构：团队角色协作，Python MCP 与 Registry 身份记忆，Node 业务状态，以及 Codex 宿主和只读 HTML](docs/assets/runtime-architecture-20260910.png)
 
-图为当前设计概览，分组表示职责而非部署机器；连线不构成完整执行时序。用户仍可直接与 Manager 或 Worker 沟通。Node 的身份校验通过 Python 只读 exporter 完成；state 到 HTML 表示经运行层导出的快照。
+图为当前设计概览，分组表示职责而非部署机器；连线不构成完整执行时序。用户仍可直接与 Manager 或 Worker 沟通。Node 的身份校验通过 Python 只读 exporter 完成；state 到 HTML 表示经运行层读取并派生视图，可用于离线导出或最新工作台。
 
 | 层 | 组成 | 职责 |
 | --- | --- | --- |
@@ -142,6 +142,14 @@ node src/cli.mjs demo artifacts/demo
 node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]
 ```
 
+需要随记录更新的固定运行入口：
+
+```text
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links]
+```
+
+打开返回的完整启动链接，页面可见时每 5 秒检查，隐藏 / 暂停 / 关闭后停止请求。服务只监听本机，Ctrl+C 停止；不启用 Agent 定时器、不消耗 Agent Token。Registry 链接团队需配置匹配的 Python 读取环境。旧静态页面不会自行变成最新页；职责、凭据与停止方法见 [最新工作台与历史快照](docs/live-dashboard.md)。
+
 单页可用 `snapshot <state.json> <新输出目录> [asOf] [roundId]`。工作台支持总览、历史轮次、任务筛选、成员、历时与证据展开；对话链接需显式启用，仅为本机兼容入口，不保证跨主机定位。历时包含排队、等待与审查，不等于模型计算耗时。
 
 团队接入从 [manager-session Skill](skills/manager-session/SKILL.md) 和 [MCP 使用说明](docs/team-context.md) 开始。读取 Skill 不激活角色，不授权安装、创建任务或定时器。
@@ -152,7 +160,7 @@ node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]
 
 ## 验证证据与下一步
 
-本 README 更新没有重跑业务测试。以下为架构基线记录的历史证据，不是本次验证或长期效果保证：
+以下为架构基线记录的历史证据，不是长期效果保证；最新工作台的隔离测试方法与范围另见 [使用说明](docs/live-dashboard.md#开发验收)，不冒充真实团队迁入或成员交付证据：
 
 | 证据 | 范围 |
 | --- | --- |

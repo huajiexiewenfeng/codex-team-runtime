@@ -43,13 +43,25 @@ members. A new executable team follows start/real pairing and registration/adopt
 then own reads and readiness. Do not bootstrap it first: identity-only
 registration is not a fresh executable team connection.
 Only Manager writes `team_context.manage`; Worker/Liaison never self-register or
-select their leader. First bootstrap needs explicit user-authorized activation,
+select their leader. An onboarding member may use the separate
+`team_context.startup` **receipt** action for its own verified identity and the
+exact Manager-prepared operation/team/member/role. This publishes candidate data,
+not membership; it is valid while `read` is null. It must not call startup
+prepare/claim/verify as Manager. Read `<runtime-root>/docs/startup-recovery.md`
+when that startup reference is in the initial handoff.
+First bootstrap needs explicit user-authorized activation,
 verified current Manager identity and its authorization reference. A reference is
 a record of permission checked outside MCP, not authentication performed by MCP.
 
 For a user-authorized formal member:
 
-1. Preserve the native creation result and resolve its exact formal host/thread ID.
+1. Manager prepares the original startup slot and claims once before new native
+   creation. Initial handoff carries exact operation/team/member/role and leader.
+   The member verifies its own identity, publishes its durable startup receipt
+   and returns its reference in its onboarding reply. Manager reads the startup
+   plan and independently reads/verifies the exact candidate; listing or final
+   reply omission is not a reason to create again.
+   Preserve the native creation result and resolve its exact formal host/thread ID.
    Creating/pending is not registered. An uncertain creation result requires
    reconciliation of that attempt, not another creation.
 2. Manager registers that target with a durable operation ID and current revision.
