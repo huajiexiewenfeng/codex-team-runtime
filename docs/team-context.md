@@ -4,24 +4,24 @@ Python 确定性模块维护 Team Registry，不调用 LLM，不依赖 AGC、hoo
 后台巡检。Manager、Liaison、Worker 使用同一套协作框架，召回自己、团队、精确
 leader、入队状态与角色职责。
 
-**当前是 context-only 基础层，不是已接入的团队执行系统。** V2 始终返回
-`executionIntegration: not-connected`、`dispatchAllowed: false`，即使已 ready
-也不能据此派工。Node 身份投影、历史任务归属、开放轮次招募和旧团队迁移是下一
-增量；本轮不修改“一键升级”等现有团队。
+未链接的团队仍是 context-only；显式迁入后的团队使用 Registry 当前身份权威与
+Node 经检查投影，保留原业务历史。`dispatchAllowed` 始终 false，表示 context
+读取本身不执行或授予派工；不能将 ready 当作工作授权。真实迁入须由原 Manager
+获得授权后执行，开发或安装不会自动迁入团队。见[迁入与恢复](team-registry-cutover.md)。
 
 ## 两种互斥模式
 
 | 模式 | 权威及工具 | 边界 |
 | --- | --- | --- |
-| `--registry`，v2 | Registry 管登记身份；`team_context.read` / `team_context.manage` | 独立登记与召回；没有 Node locator、业务状态或派工接入 |
+| `--registry`，schema 2/3 | Registry 管当前登记身份；`team_context.read` / `team_context.manage` | 未链接时仅召回；显式迁入后提供定位与 Node 检查投影，业务历史仍由 Node 管理 |
 | `--index`，v1 | Node 管身份；仅 `team_context.read` | 读取已有 locator；不再暴露早期缺少 Manager actor 区分的 register 工具 |
 
-不能把同一真实团队同时交给两种权威，也不能用旧运行层写入绕过 v2 的错误。
-旧团队原有工作不因隔离 v2 基础层的开发而取消或迁移。
+不能把同一真实团队同时交给两种权威，也不能用旧运行层写入绕过 Registry 错误。
+旧团队原有工作不因代码开发或安装而取消或迁移。
 
 ## 隔离安装与初始化
 
-需要可信 checkout、Python 3.10+ 和官方 MCP Python SDK；旧 Node CLI 需要 Node.js
+需要可信运行代码、Python 3.10+ 和官方 MCP Python SDK；Node CLI 需要 Node.js
 22+。使用独立环境，不改全局配置：
 
 ```text
@@ -48,12 +48,18 @@ codex-team-context serve --index <原-index.json> --state-root <允许的原状�
 
 旧 `init --index <new.json>` 仍可建空 locator，不登记角色。
 `ContextRegistry.register` 只保留为兼容/测试用 Python API，不是 v2 团队登记，也
-不再作为 MCP 写工具发布。不提供 v1 自动导入 v2 的入口。
+不再作为 MCP 写工具发布。不自动导入旧团队；`adopt_legacy` 是原 Manager 显式
+执行的受控迁入，不是扫描 locator 或对话目录自动登记。
 
-`--state-root` 可重复，不选磁盘根或整个用户目录。V2 只访问显式 registry，不
-遍历其他对话、状态目录或私人日志。启动进程的文件权限才是访问边界，工具参数
+`--state-root` 可重复，不选磁盘根或整个用户目录。Registry 模式只访问显式 registry
+及其明确关联的原状态，不遍历其他对话、状态目录或私人日志。启动进程的文件权限才是访问边界，工具参数
 不提供额外权限。加入全局 MCP 配置需用户另行授权；以上不代表已安装到 Codex。
 全局工具元数据可能进入其他对话目录，null 不等于目录开销为零。
+
+链接团队还需要服务配置 `--node-executable <绝对-node>` 与
+`--runtime-root <可信运行根>`。长期安装应使用稳定、同版本的 companion 代码包和
+非 editable Python 环境，不依赖可被清理的开发 worktree。代码包保留 package.json、
+src、Skill 与 docs 布局；不包含团队状态或 Registry。配置及恢复步骤见迁入指南。
 
 ## Read：精确匹配、无副作用
 
@@ -67,7 +73,7 @@ codex-team-context serve --index <原-index.json> --state-root <允许的原状�
 | 返回 | 解释 |
 | --- | --- |
 | JSON `null` | 未登记；普通工作照常，已知团队核对原定位，不猜角色或自动登记。 |
-| `status: active` | V2 返回自己、团队、leader、版本、职责、onboardingReceipt 和未接入执行的屏障；不代表宿主在线、忙闲或工作授权。 |
+| `status: active` | 返回自己、团队、leader、版本、职责、onboardingReceipt 和执行接入状态；不代表宿主在线、忙闲或工作授权。 |
 | `status: inactive` | 身份已退出，不返回可执行职责，也不从历史恢复。 |
 | `isError: true` | 无效身份、丢失/损坏文件、冲突等，不是 null 或恢复成功。 |
 
@@ -81,6 +87,12 @@ MCP SDK 拒绝，返回 SDK 原生错误，不能依赖其文本为 JSON。连�
 
 Active Manager 额外获得紧凑 `teamMembers` 名册（含退出记录），用于找回协调对象。
 Worker/Liaison 及 inactive Manager 不带该名册。成员记录不是宿主在线状态。
+
+未链接团队 `executionIntegration: not-connected`；已链接 active 为 `connected`，
+prepared 为 `migration-pending`。链接 capsule 的 runtime 给出同主机的 statePath、
+runtimeRoot、pythonExecutable、migrationId、phase 与 teamRevision。Node 调用通过
+此次进程的 `CODEX_TEAM_CONTEXT_PYTHON` 使用该 Python；不要修改全局环境或假设
+另一主机的路径可本机执行。迁移未完成或链接损坏时，不回退成 legacy 绕过屏障。
 
 ## Manage：区分操作人和目标成员
 
@@ -118,6 +130,7 @@ request 拒绝未知字段，以下字段均必填：
 | register_member | operation_id, team_id, expected_revision, member_id, name, role, target_host_id, target_thread_id, authorization_ref；Liaison 另需 consent_ref |
 | confirm_ready | operation_id, team_id, expected_revision, member_id, receipt, evidence_ref |
 | exit_member | operation_id, team_id, expected_revision, member_id, authorization_ref |
+| adopt_legacy | operation_id, team_id, team_name, member_id, state_path, expected_state_version, expected_state_sha256, members, authorization_ref, consent_ref；详见迁入指南 |
 
 Bootstrap 只在用户明确授权后执行，首次 Manager 就是 actor，不另填目标 Manager。
 authorization_ref 仅记录在宿主核对过的许可，本身不是授权证明。其他写入要求该
@@ -132,7 +145,7 @@ V2 支持 Manager-only 初始化，随后加入 Worker 和至多一位 Liaison�
 ```text
 保留原创建回执 → 解析正式身份 → Manager 登记 pending
 → 成员 read 并返回 onboardingReceipt → Manager 核对原回复并 confirm_ready
-→ 重新 read → 已接入运行层的独立派工检查（本增量尚未接入）
+→ 重新 read → 已链接运行层的独立派工检查（未链接团队不得跳过接入）
 ```
 
 Receipt 是 `v2:` 加 SHA-256 十六进制摘要，绑定 registry、team、member、角色、绑定
@@ -154,7 +167,10 @@ read/确认。Registry 不调用原生 create/send；创建不确定时核对原
 不是当前状态或授权，需重新 read。同版本并发仅一项提交，其余明确冲突。
 
 锁等待有限，不自动删除崩溃遗留锁或重新初始化绕过；先核对持锁进程。只读不拿
-写锁。退出由 Manager 在外部核对授权后登记，不取消 Node 任务或归档宿主对话。
+写锁。链接操作按 Registry → state 顺序持锁；Node 业务写入使用相同锁协议。
+退出由 Manager 在外部核对授权后登记，已链接团队还检查开放轮次参与情况，
+不取消 Node 任务或归档宿主对话。当前 API 不自动将新 Worker 加入旧轮次；
+需要时由 Manager 在成员 ready 后显式使用 Node `admitRegistryMember`。
 Manager 退出后，成员仍能读团队和 exited leader，不自动换 leader。没有在线检测，
 active 不保证 Manager 在运行；后续动作需要 leader 时保留证据并请用户决定。
 

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { isAbsolute } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { deliveryState, deliveryEventTypes } from './delivery-state.mjs';
 
 const roles = ['Manager', 'Liaison', 'Worker'];
@@ -34,8 +36,19 @@ function members(xs) {
 }
 function observation(o) { object(o,['id','at','observedAt','summary','progress','source']); id(o.id); time(o.at); time(o.observedAt,true); text(o.summary); check(typeof o.progress==='boolean','Invalid progress'); provenance(o.source); check(o.observedAt===null || o.observedAt<=o.at,'Future observation'); }
 export function validate(s) {
- object(s,['schemaVersion','version','updatedAt','team','members','rounds','tasks','events','reporting','session']); check(s.schemaVersion===1,'Unsupported schema version'); check(Number.isSafeInteger(s.version)&&s.version>=0,'Invalid version'); time(s.updatedAt);
+ object(s,['schemaVersion','version','updatedAt','team','members','rounds','tasks','events','reporting','session','registry']); check([1,2].includes(s.schemaVersion),'Unsupported schema version'); check(Number.isSafeInteger(s.version)&&s.version>=0,'Invalid version'); time(s.updatedAt);
  object(s.team,['id','name','source']); id(s.team.id); text(s.team.name); provenance(s.team.source); members(s.members);
+ if(s.schemaVersion===1) check(s.registry===undefined,'Legacy state cannot contain Registry link');
+ else {
+  object(s.registry,['registryId','registryPath','teamId','migrationId','sourceSha256','sourceVersion','phase','teamRevision','readyMemberIds']);
+  id(s.registry.registryId);text(s.registry.registryPath);check(isAbsolute(s.registry.registryPath),'Registry path must be absolute');id(s.registry.teamId);id(s.registry.migrationId);
+  check(s.registry.teamId===s.team.id,'Registry team mismatch');check(/^[0-9a-f]{64}$/.test(s.registry.sourceSha256),'Invalid Registry source SHA-256');
+  check(Number.isSafeInteger(s.registry.sourceVersion)&&s.registry.sourceVersion>=0,'Invalid Registry source version');check(['prepared','active'].includes(s.registry.phase),'Invalid Registry phase');
+  check(Number.isSafeInteger(s.registry.teamRevision)&&s.registry.teamRevision>=0,'Invalid Registry team revision');check(Array.isArray(s.registry.readyMemberIds),'Invalid Registry readiness');
+  const ready=new Set();for(const memberId of s.registry.readyMemberIds){id(memberId);check(!ready.has(memberId),'Duplicate ready Registry member');ready.add(memberId);}
+  if(s.registry.phase==='prepared'){check(s.registry.sourceVersion===s.version,'Prepared Registry source version mismatch');check(s.registry.teamRevision===0,'Prepared Registry revision must be zero');check(ready.size===0,'Prepared Registry readiness must be empty');}
+  else {check(s.registry.sourceVersion<=s.version,'Registry source version exceeds state version');check(s.registry.teamRevision>0,'Active Registry revision must be positive');check([...ready].every(memberId=>s.members.some(m=>m.id===memberId)),'Ready Registry member is missing');}
+ }
  check(Array.isArray(s.rounds)&&Array.isArray(s.tasks)&&Array.isArray(s.events),'Invalid collections');
  const roundIds=new Set(), taskIds=new Set(), eventIds=new Set();
  const recordedTime=x=>check(x===null||x<=s.updatedAt,'Timestamp exceeds state update');
@@ -68,7 +81,7 @@ export function validate(s) {
   if(t.status==='approved') { object(t.acceptance,['actor','at','summary','evidence']); check(r.members.some(m=>m.id===t.acceptance.actor&&m.role==='Manager'),'Approval requires Manager'); time(t.acceptance.at); text(t.acceptance.summary); check(t.acceptance.at===t.completedAt && Array.isArray(t.acceptance.evidence)&&t.acceptance.evidence.length>0,'Missing acceptance'); t.acceptance.evidence.forEach(text); } else check(t.acceptance===null,'Premature acceptance');
   check(r.status!=='closed'||['approved','cancelled'].includes(t.status),'Closed round contains unfinished work');
  }
- for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
+ for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
  let previousEventAt=null;
  for(const e of s.events) { check(Object.hasOwn(fields,e.type),'Unknown audit event'); recordedTime(e.at); check(previousEventAt===null||e.at>=previousEventAt,'Events out of order'); previousEventAt=e.at; check(s.members.some(m=>m.id===e.actor),'Unknown event actor'); if(e.roundId!==undefined) check(roundIds.has(e.roundId),'Unknown event round'); if(e.taskId!==undefined) check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId),'Unknown event task'); }
  check(s.events.length===s.version,'Version/event mismatch'); check(previousEventAt===null||previousEventAt===s.updatedAt,'Last event/update mismatch');
@@ -117,7 +130,7 @@ export function createState(config, at) {
  object(config,['teamId','name','source','members']); time(at);
  return validate({schemaVersion:1,version:0,updatedAt:at,team:{id:config.teamId,name:config.name,source:structuredClone(config.source)},members:structuredClone(config.members),rounds:[],tasks:[],events:[],reporting:{enabled:true,desired:'stopped',actual:'unknown',intentVersion:0,offlineReceipt:null}});
 }
-const fields={openRound:['roundId','title'],assign:['roundId','taskId','title','workerId','required','assignedAt'],submit:['roundId','taskId','summary'],review:['roundId','taskId'],rework:['roundId','taskId','summary'],approve:['roundId','taskId','summary','evidence'],block:['roundId','taskId','summary'],unblock:['roundId','taskId','summary'],observe:['roundId','taskId','observedAt','summary','progress'],closeRound:['roundId'],reports:['enabled'],reportReceipt:['intentVersion','actual'],bindMember:['memberId','binding'],exitMember:['memberId'],attachInvite:['caller','target','expiresAt'],attachConfirm:['caller','invitationId','invitationVersion'],detachLiaison:['caller','invitationId','invitationVersion','summary'],registerWorker:['caller','memberId','name','binding']};
+const fields={openRound:['roundId','title'],assign:['roundId','taskId','title','workerId','required','assignedAt'],submit:['roundId','taskId','summary'],review:['roundId','taskId'],rework:['roundId','taskId','summary'],approve:['roundId','taskId','summary','evidence'],block:['roundId','taskId','summary'],unblock:['roundId','taskId','summary'],observe:['roundId','taskId','observedAt','summary','progress'],closeRound:['roundId'],reports:['enabled'],reportReceipt:['intentVersion','actual'],bindMember:['memberId','binding'],exitMember:['memberId'],attachInvite:['caller','target','expiresAt'],attachConfirm:['caller','invitationId','invitationVersion'],detachLiaison:['caller','invitationId','invitationVersion','summary'],registerWorker:['caller','memberId','name','binding'],admitRegistryMember:['caller','roundId','memberId']};
 fields.assign.push('caller');
 fields.enqueue=[...fields.assign];
 fields.startTask=['roundId','taskId','caller'];
@@ -126,21 +139,31 @@ fields.deliveryCheck=['roundId','taskId','caller','attemptId','outcome','summary
 fields.deliveryClaim=['roundId','taskId','caller','attemptId','summary'];
 export function evolve(state,e,expectedVersion) {
  validate(state); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]]); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
+ if(state.schemaVersion===2){check(state.registry.phase==='active','Registry link is prepared; writes are fenced');check(!['bindMember','exitMember','attachInvite','attachConfirm','detachLiaison','registerWorker'].includes(e.type),'Legacy identity event forbidden in linked state');}
  const s=structuredClone(state), actor=s.members.find(m=>m.id===e.actor); check(actor?.lifecycle==='active'&&(actor.binding.status==='bound'||(e.type==='attachConfirm'&&actor.role==='Liaison'&&actor.binding.status==='unbound')),'Actor unavailable');
+ if(s.schemaVersion===2){const ready=new Set(s.registry.readyMemberIds),leader=s.members.find(m=>m.role==='Manager');check(ready.has(actor.id),'Actor is not Registry ready');check(leader&&ready.has(leader.id),'Manager leader is not Registry ready');}
  const manager=actor.role==='Manager'; check(manager||['submit','observe','attachConfirm'].includes(e.type),'Manager action required');
  const r=e.roundId?s.rounds.find(r=>r.id===e.roundId):null;
  const t=e.taskId?s.tasks.find(t=>t.id===e.taskId&&t.roundId===e.roundId):null;
  if(e.type!=='openRound'&&e.roundId) check(r?.status==='open','Round unavailable or closed');
  if(e.taskId&&!['assign','enqueue'].includes(e.type)) { check(t,'Task missing'); check(manager||(actor.role==='Worker'&&actor.id===t.workerId),'Worker ownership mismatch'); }
- if(['enqueue','startTask','cancelQueued',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
+ if(['enqueue','startTask','cancelQueued','admitRegistryMember',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
  check(t?.status!=='cancelled','Cancelled task immutable');
  if(t?.status==='queued')check(['startTask','cancelQueued'].includes(e.type),'Queued task must start before work');
  if(e.type==='submit') check(actor.role==='Worker'&&actor.id===t.workerId,'Only assigned Worker can submit');
  const transition=status=>{ check(t.status!=='approved','Completed task immutable'); const last=t.stages.at(-1); last.endedAt=e.at; t.stages.push({status,startedAt:e.at,endedAt:null}); t.status=status; };
- const assignedWorker=workerId=>{const w=r.members.find(m=>m.id===workerId),current=s.members.find(m=>m.id===workerId);check(w?.role==='Worker'&&w.lifecycle==='active'&&w.binding.status==='bound','Worker not bound');validateCaller({hostId:w.binding.hostId,threadId:w.binding.threadId});check(current?.lifecycle==='active'&&JSON.stringify(current.binding)===JSON.stringify(w.binding),'Worker binding changed');return w;};
+ const assignedWorker=workerId=>{const w=r.members.find(m=>m.id===workerId),current=s.members.find(m=>m.id===workerId);check(w?.role==='Worker'&&w.lifecycle==='active'&&w.binding.status==='bound','Worker not bound');validateCaller({hostId:w.binding.hostId,threadId:w.binding.threadId});check(current?.lifecycle==='active'&&isDeepStrictEqual(current.binding,w.binding),'Worker binding changed');if(s.schemaVersion===2)check(s.registry.readyMemberIds.includes(w.id),'Selected Worker is not Registry ready');return w;};
  const workerAvailable=workerId=>check(!s.tasks.some(x=>x.workerId===workerId&&!['queued','approved','cancelled'].includes(x.status)),'Worker busy with unapproved work');
  let detachedInvitation;
  switch(e.type) {
+  case 'admitRegistryMember': {
+   check(s.schemaVersion===2&&s.registry.phase==='active','Active linked state required');id(e.memberId);
+   check(!r.members.some(m=>m.id===e.memberId),'Member already participates in round');
+   const current=s.members.find(m=>m.id===e.memberId);
+   check(current?.role==='Worker'&&current.lifecycle==='active'&&current.binding.status==='bound','Registry member is not an active bound Worker');
+   check(s.registry.readyMemberIds.includes(current.id),'Registry member is not ready');
+   r.members.push(structuredClone(current));break;
+  }
   case 'detachLiaison': {
    validateCaller(e.caller);id(e.invitationId);text(e.summary);
    check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');
@@ -218,7 +241,7 @@ export function evolve(state,e,expectedVersion) {
  }
  s.version++; s.updatedAt=e.at;
  if(['openRound','closeRound','reports'].includes(e.type)) { s.reporting.desired=s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'; s.reporting.intentVersion=s.version; s.reporting.offlineReceipt=null; }
- const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=e[k]; if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
+ const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=e[k]; if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
  return validate(s);
 }
 function freeze(x) { if(x&&typeof x==='object') { Object.values(x).forEach(freeze); Object.freeze(x); } return x; }
@@ -231,6 +254,7 @@ export function snapshot(state,asOf,roundId=null,staleAfterMs=15*60000) {
   const latestObservation=known[0]??null, latestProgress=known.find(o=>o.progress)??null;
   return {...t,delivery:deliveryState(s,t),elapsedMs:duration(t.assignedAt),phaseElapsedMs:duration(t.stages.at(-1).startedAt),stages:t.stages.map(p=>({...p,durationMs:p.startedAt===null?null:Date.parse(p.endedAt??end)-Date.parse(p.startedAt)})),latestObservation,latestProgress,freshness:latestObservation===null?'unknown':Date.parse(asOf)-Date.parse(latestObservation.observedAt)>staleAfterMs?'stale':'recorded'};
  });
- const payload={schemaVersion:1,sourceVersion:s.version,sourceUpdatedAt:s.updatedAt,asOf,staleAfterMs,roundId,team:s.team,members:roundId===null?s.members:s.rounds.find(r=>r.id===roundId).members,rounds:s.rounds.filter(r=>roundId===null||r.id===roundId),tasks,events:s.events.filter(e=>roundId===null||e.roundId===roundId),reporting:s.reporting,sourceKinds:[...new Set([s.team.source.kind,...s.events.map(e=>e.source.kind)])],navigation:{available:false,reason:'独立 HTML 的受支持导航尚未验证；Agent 导航工具不是网页 API'}};
+ const registry=s.schemaVersion===2?{registryId:s.registry.registryId,migrationId:s.registry.migrationId,phase:s.registry.phase,teamRevision:s.registry.teamRevision,readyMemberIds:structuredClone(s.registry.readyMemberIds)}:undefined;
+ const payload={schemaVersion:s.schemaVersion,sourceVersion:s.version,sourceUpdatedAt:s.updatedAt,asOf,staleAfterMs,roundId,team:s.team,members:roundId===null?s.members:s.rounds.find(r=>r.id===roundId).members,rounds:s.rounds.filter(r=>roundId===null||r.id===roundId),tasks,events:s.events.filter(e=>roundId===null||e.roundId===roundId),reporting:s.reporting,...(registry?{registry}:{}),sourceKinds:[...new Set([s.team.source.kind,...s.events.map(e=>e.source.kind)])],navigation:{available:false,reason:'独立 HTML 的受支持导航尚未验证；Agent 导航工具不是网页 API'}};
  return freeze({...payload,snapshotId:createHash('sha256').update(JSON.stringify(payload)).digest('hex')});
 }

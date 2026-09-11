@@ -7,13 +7,13 @@ import json
 from typing import Any
 
 
-POLICY_REVISION = 1
+POLICY_REVISION = 2
 
 SHARED_RULES = (
     "Recall this capsule at first onboarding and at foreground continuation or context loss.",
     "Recall it before role-dependent coordination and before delivery, receipt, or acceptance.",
     "Treat caller-declared identity separately from action authorization and external consent.",
-    "The registry is context-only; it does not dispatch work or bypass connected runtime gates.",
+    "The registry owns current team identity; a context read does not dispatch work or bypass runtime admission.",
     "Re-read context after membership, leader, rule, or onboarding conflicts.",
     "If the leader is exited or unavailable, retain the evidence, ask the user, never elect a replacement, and do not repeatedly message.",
 )

@@ -2,6 +2,15 @@
 
 ## Identity and actor boundary
 
+For Registry-linked teams, first apply [the shared recall contract](team-context.md).
+Recover current membership from MCP, then use Node's checked projection for
+business operations. The `start`, `attach`, `detach` and `register-worker` identity
+flows below apply only to unlinked legacy state; they must not mutate linked
+identities or bypass a Registry failure. Linked membership changes use Manager
+`manage`; adding a ready Worker to an open round requires explicit
+`admitRegistryMember`. `<trusted-checkout>` below also permits the trusted installed
+companion root supplied by linked context; it never means a second state directory.
+
 Before activation or writes, obtain authoritative host context identifying the current task by hostId + threadId. For writes to existing state, match its active, bound member record. For first initialization, compare that authoritative current identity with the proposed configuration's Manager binding; do not require a record in a state file that does not yet exist. A target task listing cannot alone identify the caller. Titles, paths, copied IDs, pending IDs and self-description are not current-identity evidence. If identity or authorized file access cannot be verified, remain read-only.
 
 The `start` request's `caller` becomes the Manager binding. For `attach confirm`, the Liaison is not yet bound: compare authoritative current identity to the invitation target, not an existing bound record. Resume needs current identity but remains read-only; ordinary status needs none.
@@ -16,7 +25,7 @@ Read `<trusted-checkout>/docs/runtime-usage.md` for exact config/event fields. I
 
 One assigned unit of work has one orchestration and final-acceptance owner. Recover that owner from the user-authorized workflow, exact host/task bindings, and its verified state reference before dispatch or acceptance actions. For an active Manager Session assignment, that owner is its bound Manager. For an existing PDC Dispatch, retain its logical Manager and manifest; do not start a competing Manager Session. Merely reading this skill, finding a state file, or seeing a Manager-like title establishes neither role nor ownership.
 
-On a new turn or context recovery, use the agreed skill/runtime/state paths and the read-only `resume` contract to recover a previously activated role before its next role-dependent action. Missing or conflicting bindings stop that action, not ordinary status reads. Do not initialize replacement state to make recovery succeed. "继续" preserves the established authorized workflow without another skill invocation. A completed round does not exit the long-lived role; explicit exit remains required. Reading updated files is a foreground reload, not a persistent hook or proof that other tasks have refreshed them.
+On a new turn or context recovery, use the agreed Skill and [team-context recall](team-context.md) before the next role-dependent action. `resume` remains a read-only legacy recovery path, not a fallback around a linked Registry error. Missing or conflicting bindings stop that action, not ordinary status reads. Do not initialize replacement state to make recovery succeed. "继续" preserves the established authorized workflow without another skill invocation. A completed round does not exit the long-lived role; explicit exit remains required. Reading updated files is a foreground reload, not a persistent hook or proof that other tasks have refreshed them.
 
 Within Manager-owned work, PDC owns scoped project context, implementation-stage guidance, local verification, and knowledge sync. The Manager still owns team assignment, rework and acceptance; a Worker using PDC remains a Worker. Local PDC lifecycle records are evidence, not a second orchestration control plane. Keep project quality gates and the current role's limits intact.
 
@@ -50,7 +59,16 @@ Pass the trusted skill/operations path for applicable naming, model and ownershi
 
 For existing Workers, preserve identity, state and model/effort. Send a scoped contract update only when coordination is authorized; do not recreate, rename or reconfigure them merely to refresh instructions. A refreshed Manager does not prove its Workers have loaded the update.
 
-## Existing commands
+## Existing commands (identity writes: unlinked legacy only)
+
+For explicit Manager activation, follow [activation routing](activation.md).
+Default setup reuses the current Manager and creates/reuses one independent
+Liaison and one Worker, subject to native creation permissions. On a genuinely
+new team, `start` accepts optional `managerMemberId` / `liaisonMemberId`; choose
+globally unique IDs before the first write. The documented fresh composition is
+start, actual two-sided attach and Worker registration, adoption of that same
+state, then each member's own read and Manager readiness confirmation. Do not
+bootstrap the same Registry team first. These commands do not create windows.
 
 ```text
 node <trusted-checkout>/src/cli.mjs init <config.json> <new-state.json> [UTC-ISO-time]
@@ -79,7 +97,7 @@ Before opening a session round, use `register-worker` to record an already ident
 
 ## Native supervision contract
 
-### Correcting a confirmed Liaison pairing
+### Correcting a confirmed Liaison pairing (unlinked legacy only)
 
 Follow the `detach` request schema in runtime-usage.md. Verify the current active Manager identity, no open rounds, reports disabled, and the exact confirmed invitation ID/version. Reconcile and stop any old host automation before detaching; local reports=false is not proof of a stopped scheduler. If its status is unresolved, stop at that boundary. This command does not read/migrate reporting ledgers or operate the host.
 
@@ -124,6 +142,10 @@ For authorized new user-visible team tasks, use `角色-项目简称-任务主�
 | Review Worker | `代码审查-一键升级-版本校验` |
 
 Manager/Liaison normally have no task theme. Execution tasks include a concise theme and a Chinese responsibility label matching their actual assignment; display labels do not add new runtime roles or permissions. Do not include changing statuses (进行中/已完成), timestamps or full IDs by default. If the intended title already exists among known team tasks, use the next unused suffix `-02`, `-03`, etc. This is a display convention, not a global uniqueness guarantee.
+
+The initial minimum-team Worker may be created before any business assignment.
+Use the stable title `开发-项目简称` in that case; no invented task theme or
+changing idle status is required. Later assignments do not require renaming it.
 
 Set the title in the authorized creation request (`create_thread.title` in this host). Resolve the resulting exact hostId/threadId and verify the actual title. If the title was not applied, use the native rename operation (`set_thread_title`) on that exact formal task ID, then verify. Pending client IDs must first resolve; never recreate a task because naming failed or a list has not refreshed. If renaming is unavailable, denied or uncertain, keep the task and report the naming discrepancy; do not claim success.
 

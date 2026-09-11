@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -22,7 +23,10 @@ def _fail(code: str, message: str) -> None:
 
 class RegistryStore:
     def __init__(self, path: str | os.PathLike[str]) -> None:
-        self.path = Path(path)
+        # Resolve once so reads, the lock name, temporary replacement, and every
+        # runtime link all refer to the same persistence target, even when an
+        # operator supplied a filesystem alias.
+        self.path = Path(path).resolve()
 
     def read(self) -> Any:
         try:
@@ -36,7 +40,10 @@ class RegistryStore:
         except (json.JSONDecodeError, TypeError) as exc:
             _fail("REGISTRY_CORRUPT", f"Invalid registry JSON: {exc}")
 
-    def transact(self, callback: Callable[[Any], tuple[T, bool]]) -> T:
+    @contextmanager
+    def locked(self):
+        """Hold the canonical cross-language Registry lock for the full mutation."""
+
         lock_path = Path(f"{self.path}.lock")
         descriptor: int | None = None
         deadline = time.monotonic() + 5.0
@@ -56,11 +63,7 @@ class RegistryStore:
                 _fail("REGISTRY_LOCK_FAILED", f"Cannot lock registry {self.path}: {exc}")
         try:
             os.write(descriptor, str(os.getpid()).encode("ascii"))
-            value = self.read()
-            result, changed = callback(value)
-            if changed:
-                self._replace(value)
-            return result
+            yield
         finally:
             os.close(descriptor)
             try:
@@ -70,6 +73,14 @@ class RegistryStore:
             except OSError:
                 # Never broaden cleanup or guess that another lock is stale.
                 pass
+
+    def transact(self, callback: Callable[[Any], tuple[T, bool]]) -> T:
+        with self.locked():
+            value = self.read()
+            result, changed = callback(value)
+            if changed:
+                self._replace(value)
+            return result
 
     def _replace(self, value: Any) -> None:
         temporary: Path | None = None

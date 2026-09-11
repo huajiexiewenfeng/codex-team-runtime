@@ -37,6 +37,25 @@ node src/cli.mjs dashboard <state.json> <new-output-directory> [asOf] [--codex-l
 
 ## 持久化 CLI
 
+### Registry 接入后的身份边界
+
+下文原有启动/配对/注册示例针对未链接的 schema 1 状态。显式完成
+[Registry 迁入](team-registry-cutover.md) 后，schema 2 状态以 MCP 为当前成员身份
+权威，Node 读取时检查投影，写入时共同锁定 Registry 和 state。旧身份事件
+`bindMember/exitMember/registerWorker/attachInvite/attachConfirm/detachLiaison`
+不再允许；成员登记、确认和退出由 Manager 调用 `team_context.manage`。
+业务事件、原任务归属及独立提交/验收继续保留，不自动复制或转换历史任务。
+
+linked active 业务写入要求 Manager 与操作者 ready；派工还要求目标 Worker ready，
+并通过原有授权、忙碌/FIFO 和投递规则。prepared 阶段不能继续业务操作。
+使用 capsule 的同主机 Python 路径作为本次调用的 `CODEX_TEAM_CONTEXT_PYTHON`；
+可信 runtime-root 可为 checkout 或稳定安装代码根，不包含另一份业务状态。
+
+新登记 Worker 不自动加入已有轮次。确认 ready 后，可由 Manager 用 `apply` 提交
+`admitRegistryMember` 事件，携带通用 id/type/actor/caller/at/source 与 roundId/memberId；
+只允许向开放轮次追加当前 active/bound Worker 快照，不改写已有成员或历史轮次。
+这不是派工事件；后续仍走 queue/start 和原生投递检查。精确事件基字段见下文表。
+
 ### 启动、双向配对、Worker 注册、只读恢复
 
 这些命令操作同一个权威 state 文件，不创建真实任务、自动化或恢复 hook。`caller` 仅接受 `{hostId,threadId}`，是调用方声明而非认证。Skill 必须在当前独立任务上下文核对身份；不能按名称猜测、扫描私人会话日志或使用 `verified:true` 代替验证。协作子 Agent 不得用继承的父任务环境认领父角色。下列 fixture 示例只用于离线试验。
@@ -62,7 +81,7 @@ node src/cli.mjs start start.json state.json 2026-09-05T00:00:00.000Z
 
 本节固定时间只用于离线演示，确保后续邀请、确认与注册时间不倒退。真实调用应使用当前 UTC 时间（邀请到期时间必须晚于发布时刻），不要将默认当前时间初始化的状态与这些历史示例时间混用。
 
-输出版本 0，固定成员 ID `manager` 已绑定、`liaison` 未绑定；无 Worker、轮次或自动化。父目录必须存在；已有 state 文件拒绝覆盖，包括同一请求重放，也不会认领不同 Manager。这不是旧状态迁移命令。
+输出版本 0，默认成员 ID `manager` 已绑定、`liaison` 未绑定；无 Worker、轮次或自动化。可选 `managerMemberId`、`liaisonMemberId` 覆盖这两个 ID；省略时兼容旧值，空值、非法值或重复 ID 拒绝。跨团队接入同一 Registry 时，应在首次创建前选择全局唯一成员 ID，例如 `my-team-manager` / `my-team-liaison`。父目录必须存在；已有 state 文件拒绝覆盖，包括同一请求重放，也不会认领不同 Manager。这不是旧状态迁移命令。
 
 Manager 在自己的调用上下文登记邀请（假定当前版本 0）：
 
@@ -89,6 +108,24 @@ Manager 在自己的调用上下文登记邀请（假定当前版本 0）：
 `resume` 的 caller.json 只有 hostId/threadId。输出角色、当前开放轮次、下一动作、历史/当前快照及明确 unknown 的宿主能力。它不写入、不发消息、不启定时器、不重开轮次或复活退出角色。已配对 Liaison 可恢复只读上下文；未确认者仍可用不要求身份的 status 查询。
 
 兼容性：schemaVersion 1 增加可选 session 扩展，邀请/确认复用现有原子锁、版本及事件记录；旧文件不含 session 仍可读，查询不自动补字段或改写。旧已绑定 Manager 可 resume，旧 Liaison 无双向确认则拒绝角色 resume。符合条件的旧状态仅在显式 attach invite 时增加 session。会话模式禁止用 bindMember 单方面修改 Manager/Liaison 绑定。没有退出后重新激活、运行中迁移或自动跨宿主恢复。
+
+### New minimum-team activation
+
+用户明确启用 Manager 时，Skill 默认建立三个独立窗口：当前 Manager + 一个 Liaison + 一个 Worker；已有有效成员复用，不再创建 Manager，也不删除额外成员。这里只定义前台编排组合，CLI / MCP 不直接创建 Codex 窗口，宿主创建权限仍须满足。
+
+全新、尚未登记且没有旧状态或未决创建证据的团队，按以下顺序执行：
+
+1. 核对当前 Manager 身份和安装版本，保存本次启用引用、唯一 team/member IDs、原始 state 路径及创建结果。`start` 使用可选 `managerMemberId` / `liaisonMemberId`，一次创建真实的新 state，不覆盖已有文件。
+2. 通过宿主创建或复用已核实且属于本次团队的独立 Liaison / Worker，按 Skill 命名与模型规则配置；pending ID 必须先解析。初始消息只交接入队身份与公共契约，不分派业务开发。
+3. Manager `attach invite`，真实 Liaison 从自己的上下文 `attach confirm`；Manager `register-worker` 登记真实 Worker。此时保持零业务轮次、零任务、汇报关闭。
+4. 按 [Registry cutover 协议](team-registry-cutover.md) 对**同一份实际 state**调用 `adopt_legacy`，传入最新 version / SHA、完整名册、启用授权与真实配对证据。这个组合不先调用 `bootstrap`，因为已登记的同一团队/身份不能再次导入。
+5. 三个成员各自 `team_context.read`，Manager 核对其各自回执并 `confirm_ready`；重新读取验证三成员 ready、同一 leader、runtime connected。`dispatchAllowed:false` 仍表示召回本身不授权派工。只有已有明确业务任务且通过 admission 后才开轮、入队、派发；仅设置团队则待命。
+
+任何阶段中断或返回未知，都保留原路径、操作 ID / 请求和原生创建结果，核对后续接原步骤，不重建团队、复制 state、替成员确认或盲目重发。`start` 重放会拒绝覆盖；`attach` 重放会拒绝，应检查原事件。cutover 恢复遵循其原操作协议。
+
+已有 connected 团队通过 MCP 补齐缺少且支持登记的角色，不再使用 legacy 身份写入。已有 context-only / migration-pending / 错误状态须走恢复分支，不能视作新团队。`bootstrap` 仍仅适用于明确要求的身份登记，不会连接 Node；本组合不是将既有 context-only 团队自动转为 connected 的接口。
+
+完整 Skill 入口见 `skills/manager-session/references/activation.md`。本流程不会安装全局 hook、创建定时器或自动恢复正在运行的任务。
 
 ### 显式解除已确认 Liaison 配对
 
