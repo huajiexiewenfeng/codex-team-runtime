@@ -34,7 +34,11 @@ Orchestration: manager-session; Manager hostId/threadId; trusted state path;
 Role and scope: Worker; outcome, owned files/modules, non-goals and acceptance criteria.
 Admission: independent task or current-task amendment; current task ID;
   queue/start event and native status evidence for new work; no silent replacement.
-Project workflow: applicable PDC stage or other execution skill; preserve local gates.
+Project route: repository identity, saved projectId/host, actual workspace;
+  per-repository branch/HEAD/dirty boundary and owned write/read-only scope.
+Project context: PDC/graph or source-driven evidence references; contract revision,
+  prerequisite acceptance and integration checks; unknowns affecting this task.
+Project workflow: applicable PDC stage or source-driven execution; preserve local gates.
 Configuration: requested and verified model/effort, or explicitly unverified effective settings.
 Helpers: whether bounded delegation is authorized; direct-parent model ceiling;
   selected default/allowed effort; no new team Manager or nested dispatch control plane.
@@ -128,6 +132,12 @@ Reuse existing tasks without renaming unless the user has approved bringing thei
 ### Busy Worker admission
 
 Classify each incoming request before selecting a Worker or sending a follow-up:
+
+For new independent work, first use [project-aware selection](project-dispatch.md)
+to split project scope and choose a suitable Worker before enqueueing. A reserved
+Worker does not force independent work onto its queue when a safe authorized
+alternative exists. Existing queued/started tasks retain their recorded owner;
+selection is not a reassignment or FIFO bypass mechanism.
 
 - **Independent task:** a separately testable outcome, even in the same repository/files or with the same specialist. Persist it with `queue-task` in the Manager's existing trusted state. Do not send it to a busy Worker, including a message saying “finish T1 first, then do T2”. Queued work is not dispatched work; Worker must not start it merely because it appears in a snapshot.
 - **Current-task amendment:** a correction or clarification of the same task's acceptance criteria, or scoped review/rework feedback. Use the original task ID and state the exact change, retained scope, impact and priority. For a scope-changing amendment, coordinate a checkpoint and acknowledgement before switching work; a narrowly scoped safety correction may need immediate delivery. Do not label an independent feature an amendment because context or files overlap. If classification materially changes scope and is unclear, retain current work and ask the user.
