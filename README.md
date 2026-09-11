@@ -41,6 +41,19 @@ Skill-driven team coordination for Codex
 
 详细说明：[总体架构设计](docs/design/manager-session-runtime-architecture.md) · [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)。
 
+## PDC 与团队协作场景
+
+![PDC 与 codex-team-runtime 组合：两个独立业务项目分别维护项目知识和团队，每个团队由 Liaison、Manager 与多个 Worker 协作，并在各自代码仓库工作](docs/assets/pdc-team-business-projects-20260911.png)
+
+这张图描述 PDC 与 `codex-team-runtime` 的实际组合场景，不是必须依次调用的处理流水线，也不新增跨团队 Manager。
+
+- **PDC 提供项目知识与范围**：独立业务项目 A、B 分别维护自己的 `.llm-wiki` 与项目图谱，默认不互读、不互写；单个业务项目内部可以包含多个代码仓库。
+- **Team 负责执行与验收**：各自的 Manager 根据项目证据拆分任务，安排 Worker 到对应工作区开发；Liaison 负责沟通与进度解释。初始一个 Worker 是最小配置，不是数量上限。
+- **复用能力，不混合状态**：两边使用同一套协作软件，但按 `teamId` 维护各自的身份和任务，互不接管调度与验收。这是工作流边界，不代表操作系统或文件访问权限的安全隔离。
+- **PDC 是可选增强**：没有 PDC / Base Graph 时，团队仍能依据需求、文档和源码完成拆分、开发与验收，不要求先安装 PDC 或初始化 Wiki。
+
+具体规则见 [项目感知分派与可选 PDC 集成](skills/manager-session/references/project-dispatch.md)。
+
 ## 角色分工
 
 | 角色 | 主要职责 | 边界 |
