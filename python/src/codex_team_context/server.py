@@ -68,8 +68,12 @@ def create_server(
     @server.tool(
         name="team_context.read",
         description=(
-            "Read registered role, team, and leader context for an exact host and task "
-            "identity; an unknown identity returns JSON null."
+            "Before continuing team work after context compaction or loss of role context, "
+            "call this tool to recover your registered role, team, leader and duties. "
+            "Applies to Manager, Liaison and Worker. Use your verified current host/task "
+            "identity, never a parent's. Unknown identities return JSON null; no "
+            "registration or work authorization. Do not poll or call before every "
+            "file/tool operation."
         ),
         annotations=ToolAnnotations(
             readOnlyHint=True,
