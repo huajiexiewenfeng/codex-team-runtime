@@ -50,7 +50,7 @@ For an explicit withdrawal of unstarted work, use [queued cancellation](referenc
 
 Before an initial native assignment send or recovery of a failed/uncertain send, read [delivery recovery](references/delivery-recovery.md). Reserve one attempt locally before sending; only checked non-delivery permits a new claim for the same task. Unknown delivery retains the reservation and requires reconciliation, not resend, cancellation or another assignment.
 
-When authorized to create team tasks, apply the naming convention in [operations.md](references/operations.md#team-task-names): `角色-项目简称-任务主题`; long-lived Manager/Liaison omit the theme. Naming does not authorize task creation or renaming existing tasks, and never replaces host/thread identity.
+When authorized to create team tasks, apply the naming convention and acknowledged title finalization in [operations.md](references/operations.md#team-task-names): `角色-项目简称-任务主题`; long-lived Manager/Liaison omit the theme. Naming does not authorize task creation or renaming existing tasks, and never replaces host/thread identity.
 
 For an explicitly requested correction of a confirmed **unlinked legacy** Liaison pairing, read operations.md and runtime-usage.md for `detach`, then a fresh two-sided `attach`. Only the verified active Manager may detach, with no open rounds and reports disabled. Linked teams must not use these legacy identity writes; consult the MCP membership contract and disclose unsupported rebinding instead. Reconcile any old host automation first; detaching neither stops it nor migrates its ledger. The user chooses the replacement task; this Skill's development task is not implicitly the project's Liaison.
 

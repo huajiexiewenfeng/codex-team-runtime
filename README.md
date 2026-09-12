@@ -18,6 +18,7 @@ Skill-driven team coordination for Codex
 | 长期角色记忆 | Python MCP + Team Registry；全员精确身份召回、Manager 登记与回执确认 | MCP 不主动触发；跨月、多次自然压缩后的召回率仍待验证 |
 | Registry 运行接入 | 本地 cutover 增量连接当前身份与 Node 业务状态，保留历史；一键升级团队两名正式成员已迁入并本人确认 | 不自动迁入其他团队，不代表所有窗口已加载新版；新版真实 Worker 完整闭环仍需测试 |
 | HTML 工作台 | 本机只读最新入口按页面请求同步 Node + Registry；保留离线快照、筛选、轮次、成员与证据 | 不派工、不唤醒 Agent；不是原生实时遥测，未自动采集 Token/费用 |
+| Team Metrics | 流式导入显式指定的 JSONL；按角色、任务和任务 × 角色统计，并下钻高消耗片段的工具、压缩与来源证据 | 不扫描目录、不刷新 Registry、不接入 live dashboard；日志字节不是输入 Token，重复候选不等于浪费 |
 | 监督与汇报 | Worker 通知、前台有界检查、汇报操作账本；旧版已有现场闭环证据 | 非常驻调度器；无人值守停报、自动收件箱及强制到期宿主接入尚未完整交付 |
 
 本地安装、MCP 连接加载、成员本人恢复和自然召回成功是不同结果，不能相互替代。阶段性验证见下文，不能将旧版本测试直接当作新版全链路通过。
@@ -152,6 +153,16 @@ node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links
 
 单页可用 `snapshot <state.json> <新输出目录> [asOf] [roundId]`。工作台支持总览、历史轮次、任务筛选、成员、历时与证据展开；对话链接需显式启用，仅为本机兼容入口，不保证跨主机定位。历时包含排队、等待与审查，不等于模型计算耗时。
 
+已有明确授权、明确指定的单个 Codex JSONL 来源时，可用离线 Team Metrics 导入与导出：
+
+```text
+node src/cli.mjs metrics-import <ledger.json> <source.json> <new-ledger.json>
+node src/cli.mjs metrics <state.json> <ledger.json> [asOf]
+node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [asOf]
+```
+
+来源必须是普通文件；分块逐行导入，64 MiB 为单行保护上限，不限制整个长期日志的总大小。v2 账本保留脱敏活动元数据，兼容 v1；离线报告可从输入/非缓存输入/输出排行下钻来源行、工具结果体积、压缩节点与重复候选。原生响应与 Token 通知唯一匹配时标注 `counter-match`，不把关联当作因果，也不把 `net` 当作账单。不扫描目录、自动接入其他任务或保存对话正文。格式、合成样例与安全边界见 [Team Metrics 使用说明](docs/team-metrics.md)。
+
 团队接入从 [manager-session Skill](skills/manager-session/SKILL.md) 和 [MCP 使用说明](docs/team-context.md) 开始。读取 Skill 不激活角色，不授权安装、创建任务或定时器。
 
 长期使用应安装稳定、同版本的非 editable Python 环境、Node companion 与 Skill，将 Registry/state 与代码分开。更新保留原数据路径，不复制第二份团队；安装完成后仍需逐任务确认 MCP 已加载新版。
@@ -187,6 +198,7 @@ node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links
 - [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
 - [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)：问题、MCP 选择、恢复节点与自然召回验证。
 - [运行层使用说明](docs/runtime-usage.md) / [MCP 接口](docs/team-context.md) / [汇报账本](docs/reporting-usage.md)。
+- [Team Metrics 使用说明](docs/team-metrics.md) / [观测设计口径](docs/design/team-metrics.md) / [消耗原因与证据链](docs/design/team-metrics-explain.md)。
 - [只读工作台设计](docs/design/dashboard.md)。
 - [原始设计草案](docs/design/manager-session.md) / [V1 范围与验证门槛](docs/v1-scope.md)：保留阶段性设计与验收上下文。
 - 本地 cutover 补充材料：`docs/team-registry-cutover.md`、`docs/team-registry-cutover-validation.md`；尚未随本次文档提交发布。
