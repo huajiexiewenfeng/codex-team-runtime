@@ -145,6 +145,14 @@ def test_registry_real_stdio_lifecycle_and_authorization(tmp_path: Path) -> None
                 word in read_description
                 for word in ("registered", "role", "team", "leader", "null")
             )
+            assert "before continuing team work after context compaction" in read_description
+            assert "loss of role context" in read_description
+            assert all(role in read_description for role in ("manager", "liaison", "worker"))
+            assert "verified current" in read_description
+            assert "never a parent's" in read_description
+            assert "no registration or work authorization" in read_description
+            assert "do not poll" in read_description
+            assert len(read_description) <= 600
             assert tools["team_context.read"].input_schema["required"] == [
                 "host_id",
                 "thread_id",

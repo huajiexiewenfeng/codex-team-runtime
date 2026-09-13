@@ -170,6 +170,27 @@ class TeamRegistry:
             runtime_phase = state["registry"]["phase"]
         return self._capsule(registry, team, member, runtime_phase=runtime_phase)
 
+    def observation_identity(self, host_id: str, thread_id: str) -> dict[str, Any] | None:
+        """Return a narrow caller-declared identity projection without runtime checks."""
+
+        host_id, thread_id = _caller(host_id, thread_id)
+        registry = self._validated(self._store.read())
+        located = self._member_by_identity(registry, host_id, thread_id)
+        if located is None:
+            return None
+        team, member = located
+        return {
+            "registryId": registry["registryId"],
+            "teamId": team["id"],
+            "memberId": member["id"],
+            "role": member["role"],
+            "hostId": host_id,
+            "threadId": thread_id,
+            "memberStatus": member["lifecycle"],
+            "policyRevision": POLICY_REVISION,
+            "identitySource": "registry-at-call-start",
+        }
+
     def manage(
         self, actor_host_id: str, actor_thread_id: str, request: dict[str, Any]
     ) -> dict[str, Any]:

@@ -45,6 +45,22 @@ node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links
 
 Manager 与 Worker 仍须按已有契约记录真实进展、提交和验收，Liaison 只读解释；自动刷新不等于原生 Agent 遥测。离线导出保持不变。完整职责、安全边界与验收方法见 [最新工作台与历史快照](live-dashboard.md)。
 
+### Team Metrics 离线历史报告
+
+基础 Metrics 是独立的按需观测面，不接入上述最新工作台的刷新链路：
+
+```text
+node src/cli.mjs metrics-import <ledger.json> <source.json> <new-ledger.json>
+node src/cli.mjs metrics <state.json> <ledger.json> [asOf]
+node src/cli.mjs metrics-export <state.json> <ledger.json> <new-output-directory> [asOf]
+```
+
+导入只读取 `source.json` 明确指定的一个普通 JSONL 文件；路径相对 descriptor 目录解析，不做 glob、环境发现或递归扫描。v2 流式读取以打开时大小固定字节边界，忽略后续追加，省略并诊断不完整尾行；64 MiB 是单行保护上限，超长行明确拒绝，不截断。每次仍从头读取指定文件，不保存增量 cursor。相同输入重复合并幂等，新账本与导出目录都拒绝覆盖既有目标。
+
+`metrics` 只打印 JSON；`metrics-export` 生成 `report.json`、无脚本/网络依赖的 `index.html` 及最后落盘的 `READY.json`。两者都用 `readRawState` 读取已记录历史 state，不刷新 Registry、不读取当前宿主状态、不提供 live telemetry，也不写回业务文件。未知值不是零，部分观测明确显示缺失条数，任务关联不冒充 Token 因果。精确 JSON 格式、可复现合成样例和报告读法见 [Team Metrics 使用说明](team-metrics.md)。
+
+v2 报告增加逐计数证据卡和高消耗排行，保留来源行及可用的原生响应 `counter-match`。工具返回字节、压缩附近活动、重复调用/相同可见内容只作为有等级标注的证据或候选，不自动判定无效劳动、给出浪费分数或宣称节省 Token。旧 v1 报告仍可读取，旧记录没有活动证据时明确未知。
+
 ## 持久化 CLI
 
 ### Registry 接入后的身份边界
