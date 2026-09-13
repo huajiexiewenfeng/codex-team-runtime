@@ -3,7 +3,51 @@
 The MCP server can optionally write one bounded JSON event for each observed
 `team_context.read`, `team_context.manage`, or `team_context.startup` call.
 Collection is off by default. It is available only in Registry mode and requires
-both an absolute output root and at least one exact team allowlist entry:
+an absolute output root and either a reloadable configuration or a static
+team allowlist. Both modes remain off unless explicitly configured.
+
+## Reloadable team allowlist (recommended)
+
+Start the MCP server once with `--observation-root C:\absolute\observations`
+and `--observation-config C:\absolute\observation-config.json`, alongside the
+existing Registry/runtime arguments. The separate UTF-8 JSON file contains:
+
+```json
+{
+  "schemaVersion": 1,
+  "observedTeams": ["team-a", "team-b"]
+}
+```
+
+After this one-time server reload, adding/removing exact team IDs in this file
+does **not** require restarting Codex or the MCP process. An empty list disables
+all collection without deleting history. No timers, watchers, LLM calls, new MCP
+tools, membership mutations, or background work are introduced.
+
+The recorder performs a bounded fresh file read at call admission and before
+event publication, not an mtime-only cache. Admission must allow the team; enabling
+it during an already admitted call does not retroactively capture that call.
+If the final check sees a removal or invalid configuration, publication is skipped.
+A configuration change after that final check cannot retract an in-flight write.
+
+Missing, unreadable, malformed, oversized, or invalid files disable observation
+for that check, never reuse an old allowlist, and never break the original MCP
+operation. Repairing the file restores collection on a subsequent eligible call.
+Only the bounded stderr code `OBSERVATION_CONFIG_UNAVAILABLE` is emitted, without
+file contents or paths. No events during disabled/invalid periods are backfilled.
+
+Use atomic file replacement when editing to avoid transient partial reads. Limit:
+64 KiB, at most 1,000 unique exact team identifiers; no wildcards, duplicate JSON
+keys, duplicate teams, unknown properties, or alternate schema versions. The file
+is an operator-controlled collection policy, not a member-written Registry field.
+Its path must be absolute. Do not combine it with `--observe-team`; ambiguous
+startup configuration is rejected. Output root, configuration path and executable
+changes still require server reload. Keep the same root during transition to retain
+the location of existing events; reports continue to select files by exact team.
+
+## Static allowlist (compatible mode)
+
+Existing startup parameters continue to work unchanged:
 
 ```powershell
 python -m codex_team_context.server serve `
