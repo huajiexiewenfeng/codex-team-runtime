@@ -51,6 +51,7 @@ def create_server(
     runtime_root: str | Path | None = None,
     observation_root: str | Path | None = None,
     observed_teams: list[str] | None = None,
+    observation_config: str | Path | None = None,
     runtime_revision: str | None = None,
 ) -> MCPServer:
     """Create one transport instance without initializing or mutating its index."""
@@ -82,6 +83,7 @@ def create_server(
     recorder = configure_observations(
         root=observation_root, observed_teams=observed_teams,
         runtime_revision=runtime_revision, registry_mode=registry_mode,
+        config_path=observation_config,
     )
     team_registry = cast(TeamRegistry, registry) if registry_mode else None
 
@@ -199,6 +201,7 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--node-executable")
     serve.add_argument("--runtime-root")
     serve.add_argument("--observation-root")
+    serve.add_argument("--observation-config")
     serve.add_argument("--observe-team", action="append", dest="observed_teams")
     serve.add_argument("--runtime-revision")
     return parser
@@ -236,6 +239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_root=args.runtime_root,
                 observation_root=args.observation_root,
                 observed_teams=args.observed_teams,
+                observation_config=args.observation_config,
                 runtime_revision=args.runtime_revision,
             )
         else:
@@ -243,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 index_path=args.index, state_roots=args.state_roots,
                 observation_root=args.observation_root,
                 observed_teams=args.observed_teams,
+                observation_config=args.observation_config,
                 runtime_revision=args.runtime_revision,
             )
         server.run("stdio")
