@@ -123,6 +123,18 @@ export async function run(args,output=console.log) {
    const {exportMetrics}=await import('./metrics-export.mjs');await exportMetrics(report,resolve(a[2]));
    output(`Offline historical metrics snapshot: ${resolve(a[2],'index.html')}`);break;
   }
+  case 'metrics-daily': case 'metrics-daily-export': {
+   const usage=command==='metrics-daily'?'metrics-daily <state.json> <ledger.json> <options.json>':'metrics-daily-export <state.json> <ledger.json> <options.json> <new-output-directory>';
+   if((command==='metrics-daily'&&a.length!==3)||(command==='metrics-daily-export'&&a.length!==4))throw new Error(usage);
+   const {readRawState}=await import('./store.mjs'),{buildDailyView,exportDailyMetrics}=await import('./metrics-daily-export.mjs');
+   const rawOptions=await json(a[2]),hasMcp=rawOptions!==null&&typeof rawOptions==='object'&&!Array.isArray(rawOptions)&&Object.hasOwn(rawOptions,'mcpObservations');
+   const {mcpObservations,...dailyOptions}=hasMcp?rawOptions:{mcpObservations:null,...rawOptions};
+   let serverInput=null;
+   if(hasMcp){const {readMcpObservationManifest}=await import('./metrics-mcp-input.mjs');serverInput=await readMcpObservationManifest(mcpObservations,dirname(resolve(a[2])));}
+   const view=buildDailyView(await readRawState(a[0]),await json(a[1]),dailyOptions,serverInput);
+   if(command==='metrics-daily'){output(JSON.stringify(view,null,2));break;}
+   await exportDailyMetrics(view,resolve(a[3]));output(`Offline daily metrics snapshot: ${resolve(a[3],'index.html')}`);break;
+  }
   case 'init': { if(a.length<2||a.length>3) throw new Error('init <config.json> <state.json> [at]'); const s=createState(await json(a[0]),a[2]??now()); await initialize(a[1],s); output(`Initialized version ${s.version}`); break; }
   case 'apply': { if(a.length!==3||!/^\d+$/.test(a[2])) throw new Error('apply <state.json> <event.json> <expectedVersion>'); const s=await transact(a[0],Number(a[2]),await json(a[1])); output(`Applied version ${s.version}`); break; }
   case 'dashboard': {
@@ -148,7 +160,7 @@ export async function run(args,output=console.log) {
   }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{

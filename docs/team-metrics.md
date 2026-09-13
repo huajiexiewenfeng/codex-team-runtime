@@ -181,3 +181,44 @@ v2 `report.json` 的外层为 `schemaVersion: 2 / rulesVersion: 1`；新增的 `
 同一记录可以有多个解释标签；这些标签不是新的用量记录，不能再相加。角色自然召回率、忙碌 Worker 违规率、交付质量评分等仍需对应证据，不能由 Token 计数推导。
 
 更详细的数据口径与规则见 [Team 内建观测设计](design/team-metrics.md) 和 [消耗原因与证据链](design/team-metrics-explain.md)。
+
+## 每日离线观测
+
+每日视图要求显式提供日期范围和数据截止时间，不会自动补当前时间：
+
+```text
+node src/cli.mjs metrics-daily state.json ledger.json options.json
+node src/cli.mjs metrics-daily-export state.json ledger.json options.json new-daily-report
+```
+
+`options.json` 接受 `from`、`to`、`asOf`，以及可省略且当前只能为 `Asia/Shanghai` 的 `timeZone`。还可显式选择 MCP 服务端事件文件：
+
+```json
+{
+  "from": "2026-09-05",
+  "to": "2026-09-11",
+  "asOf": "2026-09-11T15:59:59.000Z",
+  "mcpObservations": {
+    "registryId": "registry-demo",
+    "teamId": "demo-team",
+    "sourceKind": "fixture",
+    "files": ["observations/one.json", "observations/two.json"]
+  }
+}
+```
+
+文件路径只按 `options.json` 所在目录解析；不会扫描目录或展开 glob。`sourceKind` 只能由操作员声明为 `fixture` 或 `mcp-server`。空 `files` 明确表示导入了一个空集合；省略 `mcpObservations` 则保持旧版四字段 view。读取上限为 10000 个普通文件、单文件 65536 字节、合计 67108864 字节，任何描述符、UTF-8、JSON、事件 schema 或 registry/team 范围错误都会使整次导入失败，导出目录不会创建。
+
+JSON 与 HTML 来自同一 `buildDailyView`。导出目录必须不存在，成功后包含 `report.json`、`index.html` 和最后写入的 `READY.json`。页面按北京时间自然日展示逐日趋势，以及每一天的角色、成员和模型明细；没有记录的日期显示未知，不按零填充。输入、缓存输入、输出和总量沿用累计报告口径，缓存输入包含在输入内，推理输出包含在输出内，不能横向相加。
+
+MCP 表只统计 observation 中名称精确匹配的直接 Team Context 调用。封装在 `functions.exec` 等外层工具中的调用可能无法识别，因此“未观测到直接调用”不等于零触发。调用时间为空时单列为“未知时间调用（不计入所选日期）”，与所选日期内的表格和次数分开；有时间时按事件自身的 Asia/Shanghai 日期归档，不使用关联 usage 记录时间猜测。原因、返回结果和后续行为在第一阶段均保持未知或未评估，不能依据 `tool_result` 或 Token 总量推断成功。
+
+`observationCoverage` 是所选日期范围内“用量记录附带观察比例”，不是全团队采集覆盖率或角色召回覆盖率。v1 账本没有 observation，明确标为未采集。事件成员和角色继承关联用量记录的既有归因，并标记 `usage-record-attribution`；这不是对工具事件时刻身份的独立验证。长期角色召回效果的分母、命中和行为证据尚未采集，页面不显示伪造的零或比率。
+
+页面始终标明离线、数据截止时间、统计规则版本和历史 Runtime 版本未知。只要来源含 `fixture`，还会显示“含模拟身份/数据，请勿当作真实团队完整成本”。
+
+日报页面分为“Token 使用量”和“MCP 调用情况”两个语义 Tab。默认选中 Token；可以点击，或在 Tab 上使用左右方向键、Home、End 切换。脚本只包含固定作者代码，不拼接报告字段，不使用 `innerHTML`，也不发起网络请求。若 JavaScript 未运行，两块内容仍按顺序显示，不会永久隐藏。
+
+所有数值表头和数据单元格均右对齐并使用等宽数字。角色、成员、模型三种明细表共享固定列定义；首列允许长名称换行，数值列保持不换行。MCP 工具名和证据位置允许长文本换行；宽表由可聚焦容器横向滚动，页面本身不产生横向溢出。
+
+另已实现默认关闭、按团队显式启用的 [MCP 服务端最小事件采集](mcp-observations.md)，可补足外层封装造成的调用盲区。显式选择的事件会以 `serverMcp.schemaVersion: 1` 接入顶层 `schemaVersion: 2` 日报；按 `eventId` 去重、按完成时刻和北京时间筛选，并为每个日期给出角色、原因和结果的完整枚举计数。服务端事件与原生日志观察是两类独立证据，可能重叠，不能直接相加；`matched` 只说明读取返回角色 capsule，不能推导完整覆盖率、召回有效性或后续行为符合职责。

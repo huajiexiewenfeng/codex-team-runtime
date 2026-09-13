@@ -1,32 +1,12 @@
 import { validate } from './runtime.mjs';
 import { validateUsage } from './metrics-usage.mjs';
 import { buildExplanation } from './metrics-explain.mjs';
+import { metricNames, observed, rollup } from './metrics-rollup.mjs';
 
-const metricNames = ['input', 'cachedInput', 'nonCachedInput', 'output', 'reasoningOutput', 'net', 'total'];
 const operations = ['coordination', 'implementation', 'review', 'rework', 'recovery', 'reporting', 'unknown'];
 const fail = message => { throw new Error(message); };
 const check = (condition, message) => { if (!condition) fail(message); };
 function canonicalTime(value) { check(typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value, 'asOf must be a canonical UTC ISO timestamp'); }
-function safeAdd(a, b) { const value = a + b; check(Number.isSafeInteger(value), 'Metric sum exceeds safe integer range'); return value; }
-function observed(record) {
-  const { input, cachedInput, output, reasoningOutput, total } = record.usage;
-  const nonCachedInput = input === null || cachedInput === null ? null : input - cachedInput;
-  const net = nonCachedInput === null || output === null ? null : safeAdd(nonCachedInput, output);
-  return { input, cachedInput, nonCachedInput, output, reasoningOutput, net, total };
-}
-function rollup(records) {
-  const result = {};
-  for (const name of metricNames) {
-    let known = 0, knownRecords = 0, missingRecords = 0;
-    for (const record of records) {
-      const value = observed(record)[name];
-      if (value === null) missingRecords++;
-      else { known = safeAdd(known, value); knownRecords++; }
-    }
-    result[name] = { known: knownRecords ? known : null, knownRecords, missingRecords };
-  }
-  return result;
-}
 const sameIdentity = (record, member) => member.binding?.status === 'bound' && member.binding.hostId === record.hostId && member.binding.threadId === record.threadId;
 function historicalMembers(state, record) {
   const relevantRounds = state.rounds.filter(round => record.at >= round.openedAt && (round.closedAt === null || record.at < round.closedAt));
