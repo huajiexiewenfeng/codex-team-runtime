@@ -200,6 +200,7 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 - [运行层使用说明](docs/runtime-usage.md) / [MCP 接口](docs/team-context.md) / [汇报账本](docs/reporting-usage.md)。
 - [Team Metrics 使用说明](docs/team-metrics.md) / [观测设计口径](docs/design/team-metrics.md) / [消耗原因与证据链](docs/design/team-metrics-explain.md)。
 - [只读工作台设计](docs/design/dashboard.md)。
+- [固件升级团队案例](docs/examples/firmware-upgrade-case-study.md)：脱敏的跨项目协作复盘，展示任务拆分、返工、验收分层与 Dashboard 指标边界。
 - [原始设计草案](docs/design/manager-session.md) / [V1 范围与验证门槛](docs/v1-scope.md)：保留阶段性设计与验收上下文。
 - 本地 cutover 补充材料：`docs/team-registry-cutover.md`、`docs/team-registry-cutover-validation.md`；尚未随本次文档提交发布。
 
