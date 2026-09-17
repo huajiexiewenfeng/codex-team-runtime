@@ -5,6 +5,32 @@ formal members merely because they inherited parent context or environment.
 
 ## Recall and authority
 
+### Declare the reason on the existing call
+
+For Manager, Liaison and Worker, include top-level `reason` on an already needed
+`team_context.read`, `team_context.manage` or `team_context.startup` call when the
+immediate trigger is known. This is a shared call-field contract, not another
+reason to call MCP. Select one truthful value:
+
+| Immediate trigger | `reason` |
+| --- | --- |
+| Known context compaction followed by role recovery | `post_compaction` |
+| Team/member onboarding, including its creation/registration/readiness steps | `onboarding` |
+| Continuing foreground team work | `resume` |
+| Role check immediately before dispatch / delivery / review | `before_dispatch` / `before_delivery` / `before_review` |
+| Resolving conflicting identity evidence | `identity_conflict` |
+| Explicit manual context check | `manual` |
+| Trigger cannot be determined | `unknown` |
+
+When recovery is caused by known compaction and dispatch comes next, select
+`post_compaction` for the recovery read; do not invent compaction from a restart
+or elapsed time. For example, with independently verified own identity:
+`{"host_id":"local","thread_id":"verified-own-thread","reason":"post_compaction"}`.
+For manage/startup, `reason` belongs beside actor fields and `request`, not inside
+`request`. The transport remains backward compatible with omission (`unknown`).
+Do not retry a successful operation merely to add this field, relabel historical
+unknown events, or claim that an agent-declared reason proves recall effectiveness.
+
 On first onboarding, foreground team continuation/context loss, before delivery,
 receipt or acceptance, and before coordination when identity/rules are stale or
 conflicting, call `team_context.read` with the verified current hostId/threadId.
@@ -93,10 +119,14 @@ is not a safe retry. Do not retry a version conflict blindly.
 - Manager owns team membership, scope, coordination and independent review/
   acceptance; Worker completion is a cue to inspect actual evidence.
 - Worker stays within its assignment and owns its evidence. Before delivery,
-  recover own/team/leader context and follow operations.md's **Submission notices**:
-  durable own-member submit, prepare and verify notice, then at most one authorized
-  native send to the exact Manager. A prepared notice is not sent; uncertainty is
-  not permission to resend. Registry has no submission or messaging API.
+  recover own/team/leader context and follow [completion notification](completion-notification.md):
+  save evidence and proactively notify the exact Manager at agreed stage checkpoints.
+  Formal own-member submissions use operations.md's **Submission notices**;
+  non-submit stages are labelled separately. A prepared notice is not sent;
+  uncertainty is not permission to resend. Registry has no submission or messaging API.
+  Preserve the existing user-authorized report scope and native target evidence
+  from the handoff; ready/capsule is not permission to disclose private material.
+  An unchanged valid grant needs no new approval simply because roles were recalled.
 - Liaison explains current evidence and decisions without assigning or accepting
   work. No ordinary progress report after the relevant work closes; membership
   remains until explicit exit. Existing reporting gates and timer policy apply.

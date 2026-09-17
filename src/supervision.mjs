@@ -1,4 +1,5 @@
 import { validate, validateCaller } from './runtime.mjs';
+import { pendingSubmissions } from './submission-notice.mjs';
 
 const check=(ok,message)=>{if(!ok)throw new Error(message);};
 const key=identity=>JSON.stringify([identity.hostId,identity.threadId]);
@@ -9,7 +10,7 @@ export function planSupervision(state,caller,cursors=[]) {
  validate(state);validateCaller(caller);
  const manager=state.members.find(m=>m.role==='Manager');
  check(manager.lifecycle==='active'&&manager.binding.status==='bound'&&key(manager.binding)===key(caller),'Supervision requires the current active bound Manager');
- const targets=new Map();
+ const targets=new Map(),taskChecks=[];
  for(const task of state.tasks) {
   const round=state.rounds.find(r=>r.id===task.roundId);
   if(round.status!=='open'||['approved','queued','cancelled'].includes(task.status))continue;
@@ -17,6 +18,9 @@ export function planSupervision(state,caller,cursors=[]) {
   check(historical?.role==='Worker'&&historical.lifecycle==='active'&&historical.binding.status==='bound','Historical Worker unavailable');
   check(current?.role==='Worker'&&current.lifecycle==='active'&&current.binding.status==='bound'&&key(current.binding)===key(historical.binding),'Current Worker identity differs from historical assignment');
   const target=identity(historical.binding);targets.set(key(target),target);
+  taskChecks.push({taskId:task.id,roundId:task.roundId,worker:{...target},taskStatus:task.status,
+   nextAction:({submitted:'inspect-submission',reviewing:'continue-review',blocked:'inspect-blocker'})[task.status]??'check-progress',
+   notificationStatus:'unknown',notificationSource:'not-read',requiresManagerReview:true});
  }
  check(Array.isArray(cursors),'Cursors must be an array of exact target identities');
  const seen=new Set();
@@ -29,7 +33,8 @@ export function planSupervision(state,caller,cursors=[]) {
  }
  const values=[...targets.values()],batches=[];
  for(let i=0;i<values.length;i+=8)batches.push({targets:values.slice(i,i+8),timeoutMs:0});
- return {sourceVersion:state.version,sourceUpdatedAt:state.updatedAt,team:structuredClone(state.team),sourceKinds:[...new Set([state.team.source.kind,...state.events.map(e=>e.source.kind)])],identityAssurance:'caller-declared',readOnly:true,executed:false,batches};
+ return {sourceVersion:state.version,sourceUpdatedAt:state.updatedAt,team:structuredClone(state.team),sourceKinds:[...new Set([state.team.source.kind,...state.events.map(e=>e.source.kind)])],identityAssurance:'caller-declared',readOnly:true,executed:false,
+  taskChecks,pendingSubmissions:pendingSubmissions(state,caller),batches};
 }
 
 // Inject a host adapter explicitly. Node does not inherently have Desktop tools.

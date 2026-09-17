@@ -97,7 +97,7 @@ def create_server(
             "Applies to Manager, Liaison and Worker. Use your verified current host/task "
             "identity, never a parent's. Unknown identities return JSON null; no "
             "registration or work authorization. Do not poll or call before every "
-            "file/tool operation. Optionally supply reason for observation; declared "
+            "file/tool operation. Supply reason when known; use unknown only when uncertain; declared "
             "reasons are not independently verified."
         ),
         annotations=ToolAnnotations(
@@ -126,8 +126,8 @@ def create_server(
         @server.tool(
             name="team_context.manage",
             description=(
-                "Apply one authorized, idempotent team registry operation. Optionally "
-                "supply reason for observation; declared reasons are not independently verified."
+            "Apply one authorized, idempotent team registry operation. "
+            "Supply reason when known; use unknown only when uncertain; declared reasons are not independently verified."
             ),
             annotations=ToolAnnotations(
                 readOnlyHint=False,
@@ -160,7 +160,7 @@ def create_server(
                     "Recover authorized member startup: Manager prepares/claims creation, "
                     "records results, verifies candidate identities or reads a plan; "
                     "members publish their own receipt. Never registers or dispatches. "
-                    "Optionally supply reason for observation; declared reasons are not "
+                    "Supply reason when known; use unknown only when uncertain; declared reasons are not "
                     "independently verified."
                 ),
                 annotations=ToolAnnotations(

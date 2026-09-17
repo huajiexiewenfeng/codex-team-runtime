@@ -5,14 +5,14 @@ export function deliveryState(state,task) {
  const events=state.events.filter(e=>e.taskId===task.id&&e.roundId===task.roundId);
  const assignments=events.filter(e=>['assign','startTask'].includes(e.type)),records=events.filter(e=>deliveryEventTypes.includes(e.type));
  const initial=assignments.length===1?assignments[0]:null;
- const result={status:['queued','cancelled'].includes(task.status)?'unstarted':'unknown',attemptId:initial?.id??null,evidenceEventId:null,attempts:0};
+ const result={status:task.status==='queued'||(task.status==='cancelled'&&!task.stages.some(p=>p.status==='executing'))?'unstarted':'unknown',attemptId:initial?.id??null,evidenceEventId:null,attempts:0};
  if(!records.length)return result;
  check(initial,'Delivery recovery requires one original assignment audit');
  const round=state.rounds.find(r=>r.id===task.roundId),worker=round.members.find(m=>m.id===task.workerId);
  let started=false,advanced=false,observed=false;
  for(const [index,e] of events.entries()) {
   if(e===initial)started=true;
-  if(['submit','review','rework','approve','block','unblock','cancelQueued'].includes(e.type))advanced=true;
+  if(['submit','review','rework','approve','block','unblock','cancelQueued','cancelStopped'].includes(e.type))advanced=true;
   if(e.type==='observe')observed=true;
   if(!deliveryEventTypes.includes(e.type))continue;
   // Prefer audit order when timestamps tie; legacy observations without an audit

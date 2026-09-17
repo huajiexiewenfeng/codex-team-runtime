@@ -1,6 +1,6 @@
 # 最新工作台与历史快照
 
-`dashboard-serve` 提供本机只读、随台账更新的最新工作台。`dashboard` / `snapshot` / `render` 继续导出不可变离线历史，两种模式并存，不互相覆盖。
+`dashboard-serve` 提供本机只读的统一团队工作台：「任务进度 / 指标统计」两个页签共享一个入口。任务随台账更新，指标按需读取显式绑定的日报快照。详见 [统一入口与数据边界](dashboard-portal.md)。`dashboard` / `snapshot` / `render` 继续导出不可变离线历史，不互相覆盖。
 
 ## 谁维护什么
 
@@ -18,7 +18,7 @@
 在可信 Runtime checkout 中，用原团队的权威状态路径：
 
 ```text
-node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links]
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]
 ```
 
 - 只绑定 `127.0.0.1`。默认端口 `4319`；多团队使用各自明确端口，或 `--port 0` 分配空闲端口。端口占用会失败，不抢占旧服务，也不静默切换团队。
@@ -43,7 +43,7 @@ node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links
 
 ## 安全与事实边界
 
-HTTP 只提供固定 shell、CSS、浏览器脚本及 `/api/view`；数据接口要求随机的每进程 Bearer 凭据，并检查 Host、Origin 和 Fetch Metadata。没有任意文件路径参数、CORS、写入、导航执行、消息或定时任务 API；响应 `no-store`、禁止框架嵌入、外链脚本和外部网络来源。源读取失败返回无私有路径的错误，不回退到过期成员缓存。
+HTTP 只提供固定 shell、CSS、浏览器脚本及 `/api/view`、`/api/metrics`；两个数据接口均要求随机的每进程 Bearer 凭据，并检查 Host、Origin 和 Fetch Metadata。指标只读取启动时配置的同团队 JSON，完整校验后安全渲染，不加载任意 HTML。没有 HTTP 文件路径参数、CORS、写入、导航执行、消息或定时任务 API；响应 `no-store`、禁止框架嵌入、外链脚本和外部网络来源。源读取失败返回无私有路径的错误，不回退到过期成员缓存。
 
 这是可信本机工具，不是多用户权限系统。它不能抵御已控制同一操作系统账户、浏览器或同源历史 Service Worker 的恶意代码；不同本机服务不要长期复用同一浏览器 origin，可用 `--port 0` 降低碰撞。不要端口转发、反向代理或公开托管此服务；需要远程协作时应另行设计身份与网络隔离。
 

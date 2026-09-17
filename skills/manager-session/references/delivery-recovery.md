@@ -1,5 +1,9 @@
 # Same-task delivery recovery
 
+For Worker-to-Manager stage completion and submission, use
+[completion notification](completion-notification.md). The assignment claims below
+must not track, retry or suppress completion notifications.
+
 Read the trusted checkout's `docs/runtime-usage.md`, section “同一任务的派发恢复”, before using the commands. This reference governs Manager-to-Worker initial assignment delivery only. Worker submission notices and scoped review/amendment messages have separate contracts. No timer, automatic dispatch, host-send transaction, or cancellation of started work is added.
 
 ## Reconcile before retrying

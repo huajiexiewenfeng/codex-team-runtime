@@ -102,6 +102,8 @@ function requireReady(state, notice) {
 function decision(state, ledger, entry, review, at) {
   const base = { sourceVersion: state.version, ledgerVersion: ledger.version,
     notificationId: review.notificationId, readOnly: true, hostActionExecuted: false,
+    taskStatus: state.tasks.find(task => task.id === review.taskId).status,
+    notificationOutcome: entry ? (entry.attempts.length ? lastResult(entry.attempts.at(-1)) : entry.baseline.outcome) : 'unknown',
     identityAssurance: 'caller-declared', evidenceAssurance: 'caller-assessed',
     attemptCount: entry?.attempts.length ?? 0,
     baseline: entry?.baseline ?? null, attempts: structuredClone(entry?.attempts ?? []) };

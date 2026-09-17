@@ -28,6 +28,11 @@ export async function cancelQueuedTask(path,request,expectedVersion) {
  const state=await readState(path),actor=managerFor(state,request.caller);
  return transact(path,expectedVersion,{...request,type:'cancelQueued',actor:actor.id});
 }
+export async function cancelStoppedTask(path,request,expectedVersion) {
+ requestShape(request,['id','caller','at','source','roundId','taskId','summary','cancellation'],expectedVersion);
+ const state=await readState(path),actor=managerFor(state,request.caller);
+ return transact(path,expectedVersion,{...request,type:'cancelStopped',actor:actor.id});
+}
 
 // Readiness is local admission only, never proof that the native task is idle.
 // No message payload: enqueueing and inspecting a queue must not contact Workers.

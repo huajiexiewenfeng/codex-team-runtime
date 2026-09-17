@@ -38,6 +38,12 @@ Only Manager maintains the registry, after externally verified bootstrap/member 
 
 ## Intent routing
 
+Use one **团队工作台 (Team Dashboard)** entry with **任务进度** for tasks, members,
+blockers and acceptance, and **指标统计** for daily Token usage and MCP observations.
+Read [Dashboard routing](references/dashboard.md) before handing off the entry.
+A bare “dashboard/看板” opens this unified entry, not the last HTML file. Explain
+the two tabs; missing Metrics input is unbound, never zero or a substitute Token audit.
+
 Timers are OFF by default. Role activation, new work, "continue", and Worker completion do not authorize creating or resuming a timer. Use completion/blocker messages and user-triggered checks without a polling loop. An explicitly requested timer requires a human-confirmed fixed window of at most 24 hours; renewal requires fresh human confirmation. Before enabling one, read [timer authorization and expiry](references/operations.md#timer-authorization-and-expiry). This policy does not stop Workers or exit roles.
 
 Before continuing role-dependent work or selecting another workflow skill, recover the current role and the same work's existing orchestration owner using [ownership and continuation](references/operations.md#ownership-and-continuation). Manager Session owns team scheduling and acceptance only for its verified assigned scope; PDC can supply project stages without taking that ownership. A skill call is not an ownership transfer. New Worker handoffs must carry the [Worker composition contract](references/operations.md#worker-composition-contract).
@@ -48,7 +54,11 @@ Before selecting a Worker for new work, apply [project-aware decomposition and o
 
 For an explicit withdrawal of unstarted work, use [queued cancellation](references/operations.md#queued-cancellation). Cancellation is a retained outcome, not approval, deletion or a command to stop a running Worker.
 
+For explicitly withdrawn **started but stopped** work, use [stopped-task cancellation](references/operations.md#stopped-task-cancellation). Only initial executing work with verified stop/WIP evidence and resolved delivery is supported; native idle alone cannot release it.
+
 Before an initial native assignment send or recovery of a failed/uncertain send, read [delivery recovery](references/delivery-recovery.md). Reserve one attempt locally before sending; only checked non-delivery permits a new claim for the same task. Unknown delivery retains the reservation and requires reconciliation, not resend, cancellation or another assignment.
+
+Normal team communication within an unchanged valid assignment/report grant needs no extra Skill approval or evidence-formatting step. Use [compact communication evidence](references/communication-evidence.md) only to diagnose missing/conflicting evidence or an approval failure; it cannot grant permission or unlock a denied request.
 
 When authorized to create team tasks, apply the naming convention and acknowledged title finalization in [operations.md](references/operations.md#team-task-names): `角色-项目简称-任务主题`; long-lived Manager/Liaison omit the theme. Naming does not authorize task creation or renaming existing tasks, and never replaces host/thread identity.
 
@@ -56,9 +66,9 @@ For an explicitly requested correction of a confirmed **unlinked legacy** Liaiso
 
 - **Status/history and Liaison:** read snapshots only. Liaison explains evidence and discusses decisions with the user; it does not command Workers or write Manager state. A durable command inbox is not implemented.
 - **Explicit activation, pairing, role recovery, Worker registration, supervision, acceptance or exit:** read [references/operations.md](references/operations.md) and the selected runtime's `docs/runtime-usage.md`. Unlinked legacy `start` creates local role records only; Manager invites and the target Liaison confirms from its own context using `attach`. Linked membership uses MCP, not these identity commands. Legacy `resume` returns guidance without mutation; linked recall uses the shared team-context contract. Missing dependencies or unverifiable current identity stop identity-dependent operations, not ordinary status reads.
-- **HTML workbench / stale Dashboard:** follow [Dashboard operation and ownership](references/dashboard.md). `dashboard-serve` provides the user-requested local latest view; visible-browser refresh is deterministic, not an Agent timer. `dashboard`/`snapshot`/`render` retain new-directory-only offline exports. Plain status queries do not start services. Manager/Workers maintain authorized records; Liaison explains the view without writing Manager state.
-- **Manager supervision pass:** use the executable `supervision-plan` in operations.md to select active Worker targets, then invoke available native tools within authorization. A generated plan is not an executed query; raw host results require review, never automatic acceptance.
-- **Worker submission / Manager receipt:** read [submission notices](references/operations.md#submission-notices) for the executable `submission-notice` / `receive-submission` flow. It starts review from a verified durable submission, not approval or background monitoring.
+- **团队工作台 / 任务进度 / 指标统计 / stale Dashboard:** follow [Dashboard routing and ownership](references/dashboard.md). `dashboard-serve` is one entry with two tabs; bind a verified same-team daily report using `--metrics-report`. Work auto-sync does not refresh or collect Metrics. Plain status queries do not start services. Manager/Workers maintain authorized records; Liaison explains the view without writing Manager state.
+- **Manager supervision pass:** use `supervision-plan` in operations.md to inspect durable `taskChecks` and `pendingSubmissions` as well as bounded native observations. No message or an empty host result is not a reason to skip existing review work. A generated plan is not an executed query or automatic acceptance.
+- **Worker stage completion / submission / Manager receipt:** follow [completion notification](references/completion-notification.md): save evidence, proactively notify the exact Manager, then independent pass/rework. Carry existing user authorization and native target evidence in handoffs, without repeated approval for unchanged grants; Registry readiness is not host authentication. Formal submissions use `submission-notice` / `receive-submission`; non-submit stages/blockers are labelled separately. Preparation, submission, delivery, receipt and acceptance are separate facts. Old workarounds do not authorize permanent silence; new notice IDs do not clear a denial of the same disclosure. Host reconsideration is separate and cannot be guaranteed by this Skill.
 - **Reporting coordination records:** read the companion checkout's `docs/reporting-usage.md` for `reporting-init`, `reporting-plan` and `reporting-apply`. These manage a local operation ledger only; they do not create or stop automation. Uncertain outcomes require reconciliation, not repeated creation.
 - **Background reports, automatic recovery and webpage navigation:** disclose unsupported integration. Agent tools are not an HTML API. Do not invent deep links, commands, or successful scheduler receipts.
 

@@ -22,6 +22,12 @@ node src/cli.mjs receive-submission <state.json> <manager-caller.json> <notice.j
 已有业务 state 不因记录发送结果而升级版本；文件锁和 Registry 投影复用原存储机制。
 `notice-plan` 不改变业务/账本内容，但短暂获取一致性读取用的锁文件。
 
+`notice-plan` 分别返回当前 `taskStatus` 和该通知的 `notificationOutcome`。
+后者来自最后一次尝试的最后记录，或首次登记结果；未登记时为 `unknown`。
+例如 `taskStatus: reviewing` 与 `notificationOutcome: policy-denied` 可以同时存在：
+Manager 已在获准前台检查已有提交，不代表旧消息已送达或拒绝被解除。
+`action/reason` 是当前发送决策，不能当成历史通知结果；二者不得互相覆盖。
+
 三个写命令的 request 公共字段：
 
 | 字段 | 内容 |

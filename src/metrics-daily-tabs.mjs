@@ -1,4 +1,4 @@
-export function setupDailyTabs(document) {
+export function setupDailyTabs(document, onActivate = () => {}) {
   const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
   const panels = tabs.map(tab => document.getElementById(tab.getAttribute('aria-controls')));
   if (tabs.length < 2 || panels.some(panel => panel === null)) return;
@@ -10,6 +10,7 @@ export function setupDailyTabs(document) {
       panels[itemIndex].hidden = !active;
     });
     if (moveFocus) tabs[index].focus();
+    onActivate(index);
   };
   tabs.forEach((tab, index) => {
     tab.addEventListener('click', () => activate(index, true));

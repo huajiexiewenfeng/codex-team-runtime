@@ -143,10 +143,10 @@ node src/cli.mjs demo artifacts/demo
 node src/cli.mjs dashboard <state.json> <新输出目录> [asOf] [--codex-links]
 ```
 
-需要随记录更新的固定运行入口：
+统一团队工作台入口：任务进度自动同步；指标统计按需读取绑定的日报快照（内部保留 Token / MCP 页签）。缺失指标不按零处理；任务同步不会自动采集 Token。见 [统一入口说明](docs/dashboard-portal.md)。
 
 ```text
-node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links]
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]
 ```
 
 打开返回的完整启动链接，页面可见时每 5 秒检查，隐藏 / 暂停 / 关闭后停止请求。服务只监听本机，Ctrl+C 停止；不启用 Agent 定时器、不消耗 Agent Token。Registry 链接团队需配置匹配的 Python 读取环境。旧静态页面不会自行变成最新页；职责、凭据与停止方法见 [最新工作台与历史快照](docs/live-dashboard.md)。

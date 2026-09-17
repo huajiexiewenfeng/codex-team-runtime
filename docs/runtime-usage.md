@@ -1,5 +1,7 @@
 # 最小运行层使用说明
 
+已启动且明确停止的任务撤销：见 [cancel-stopped](cancel-stopped.md)，包含请求结构、兼容与安装边界。
+
 状态：实现切片，SUBMITTED，待父任务验收。Node.js 22+，零第三方依赖，无需安装。
 
 ## 离线演示
@@ -35,10 +37,12 @@ node src/cli.mjs dashboard <state.json> <new-output-directory> [asOf] [--codex-l
 
 这是需在使用环境核对的兼容方式：本机客户端按线程 ID 查找，URL 的 `hostId` 参数不能保证主机定位，因此链接不附带该参数；已移动或多主机同 ID 的任务不能靠此入口锁定原主机。当前环境的正确跳转已有用户确认，其他浏览器可能要求确认或不支持该协议；请核对打开后的成员身份。它不是网页调用 Agent 导航工具的 API，也不发送提示词。严格宿主导航仍待接入，详见 [导航核对记录](design/codex-navigation.md)。
 
-### 自动同步的最新工作台
+### 统一团队工作台：任务进度 / 指标统计
+
+一个入口、两个页签；可选 `--metrics-report` 绑定本团队 `metrics-daily-export` 输出的 `report.json`。指标内部继续分为 Token / MCP 页签，标注独立的数据时间与覆盖缺口；没有文件时明确未接入，不自动扫描日志。详见 [统一工作台](dashboard-portal.md)。
 
 ```text
-node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links]
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]
 ```
 
 只监听本机，前台运行，Ctrl+C 停止。使用命令返回的完整启动链接；schema 2 按原 Registry 配置提供本次进程的 `CODEX_TEAM_CONTEXT_PYTHON`。页面可见时约每 5 秒请求当前 Node + Registry 投影，隐藏 / 暂停 / 关闭后停止新请求。无 Agent 唤醒、无后台扫描、无业务写入。断连保留上次成功视图并警告；服务重启需要新的启动链接。默认端口 4319，`--port 0` 可为多团队分配空闲端口。
@@ -248,6 +252,13 @@ node src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json]
 命令只打印计划，不连接宿主、不写状态、不唤醒任务。Desktop 中由 Agent 核对版本和真实目标后调用原生工具，不能把 fixture 示例发送给真实宿主。模块 `runSupervision(state,caller,waitThreads,cursors)` 可通过注入函数执行一轮批次并保留原始结果；它不是 Node 到 Desktop 的隐藏 API。错误不自动重试，返回信息需 Manager 审查，宿主完成不自动更改任务业务状态。
 
 ### 无定时器提交通知与接收
+
+`supervision-plan` 同时返回 `taskChecks`（业务状态及下一步检查）和
+`pendingSubmissions.notices`（权威 state 中待审提交）。原生查询失败或没有收到消息不清空这些待审事项。
+Manager 在已授权前台监督中检查 submitted / reviewing / blocked；接收、检查和验收仍为独立动作。
+计划不读取通知账本，所以 `notificationStatus: unknown`、`notificationSource: not-read` 不能解释成发送失败。
+正式通知的实际发送结果用原 `notice-plan` 单独核对，非正式阶段使用原获准保存的结果证据。
+该功能不保证自动唤醒，不新增计时器、不放宽任何宿主权限，也不允许绕过拒绝搬运受限内容。
 
 ```text
 node src/cli.mjs submission-notice <state.json> <worker-caller.json> <taskId>

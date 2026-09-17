@@ -5,7 +5,7 @@ import { deliveryState, deliveryEventTypes } from './delivery-state.mjs';
 
 const roles = ['Manager', 'Liaison', 'Worker'];
 const statuses = ['queued', 'executing', 'submitted', 'reviewing', 'rework', 'approved', 'blocked', 'cancelled'];
-const transitions = {queued:['executing','cancelled'],executing:['submitted','blocked'],submitted:['reviewing','blocked'],reviewing:['rework','approved','blocked'],rework:['submitted','blocked'],approved:[],cancelled:[]};
+const transitions = {queued:['executing','cancelled'],executing:['submitted','blocked','cancelled'],submitted:['reviewing','blocked'],reviewing:['rework','approved','blocked'],rework:['submitted','blocked'],approved:[],cancelled:[]};
 const fail = message => { throw new Error(message); };
 const check = (condition, message) => { if (!condition) fail(message); };
 function object(x, keys) { check(x && typeof x === 'object' && !Array.isArray(x), 'Expected object'); check(Object.keys(x).every(k => keys.includes(k)), 'Unknown field'); }
@@ -35,6 +35,31 @@ function members(xs) {
  for (const role of ['Manager','Liaison']) check(xs.filter(m=>m.role===role).length===1,`Exactly one ${role} required`);
 }
 function observation(o) { object(o,['id','at','observedAt','summary','progress','source']); id(o.id); time(o.at); time(o.observedAt,true); text(o.summary); check(typeof o.progress==='boolean','Invalid progress'); provenance(o.source); check(o.observedAt===null || o.observedAt<=o.at,'Future observation'); }
+// Evidence references are checked declarations, not host authentication or a stop command.
+function stoppedCancellation(s,t,e) {
+ const c=e.cancellation;object(c,['worker','authorizationRef','authorizedAt','stopObservationId','workerAcknowledgementRef','idle','execution','deliveryAttemptId','wip']);
+ const r=s.rounds.find(r=>r.id===t.roundId),w=r.members.find(m=>m.id===t.workerId),m=r.members.find(m=>m.id===e.actor&&m.role==='Manager');
+ validateCaller(e.caller);check(m&&m.binding.status==='bound'&&e.caller.hostId===m.binding.hostId&&e.caller.threadId===m.binding.threadId,'Cancellation Manager identity mismatch');
+ validateCaller(c.worker);check(c.worker.hostId===w.binding.hostId&&c.worker.threadId===w.binding.threadId,'Cancellation Worker identity mismatch');
+ const stages=t.status==='cancelled'?t.stages.slice(0,-1):t.stages;
+ check(stages.at(-1)?.status==='executing'&&stages.every(p=>['queued','executing'].includes(p.status))&&t.submissions===0&&t.assignedAt!==null,'Only initial executing work can be withdrawn');
+ text(e.summary);text(c.authorizationRef);time(c.authorizedAt);check(c.authorizationRef===e.source.ref,'Withdrawal source mismatch');
+ check(c.authorizedAt>=t.assignedAt&&c.authorizedAt<=e.at,'Withdrawal authorization time invalid');
+ id(c.stopObservationId);text(c.workerAcknowledgementRef);
+ const o=t.observations.find(o=>o.id===c.stopObservationId);
+ check(o&&o.progress===false&&o.source.kind==='host-observation'&&o.source.hostId===c.worker.hostId&&o.source.threadId===c.worker.threadId&&o.observedAt!==null&&o.observedAt>=c.authorizedAt&&o.at<=e.at,'Stopped Worker observation required');
+ check(t.observations.at(-1)?.id===o.id,'Newer observation requires stop reconciliation');
+ const observationIndex=s.events.findIndex(a=>a.id===o.id&&a.type==='observe'&&a.taskId===t.id&&a.roundId===t.roundId&&a.at===o.at&&isDeepStrictEqual(a.source,o.source));
+ check(observationIndex>=0,'Stopped observation audit required');
+ const cancellationIndex=s.events.findIndex(a=>a.id===e.id);
+ check(cancellationIndex<0||observationIndex<cancellationIndex,'Stopped observation must precede cancellation');
+ object(c.idle,['status','checkedAt','ref']);text(c.idle.ref);time(c.idle.checkedAt);
+ check(c.idle.status==='idle'&&c.idle.checkedAt>=o.at&&c.idle.checkedAt<=e.at&&Date.parse(e.at)-Date.parse(c.idle.checkedAt)<=300000,'Fresh idle observation required (within five minutes)');
+ object(c.execution,['status','checkedAt','inFlightMessages','ref']);check(c.execution.status==='stopped'&&c.execution.inFlightMessages==='none','Execution and in-flight messages must be confirmed stopped');text(c.execution.ref);time(c.execution.checkedAt);
+ check(c.execution.checkedAt>=o.at&&c.execution.checkedAt<=e.at&&Date.parse(e.at)-Date.parse(c.execution.checkedAt)<=300000,'Fresh execution check required (within five minutes)');
+ const delivery=deliveryState(s,t);id(c.deliveryAttemptId);check(delivery.status==='delivered'&&delivery.attemptId===c.deliveryAttemptId,'Resolved delivered assignment required; unknown delivery cannot be cancelled');
+ object(c.wip,['disposition','ref','summary']);check(['none','retained','handed-off'].includes(c.wip.disposition),'Invalid WIP disposition');text(c.wip.ref);text(c.wip.summary);
+}
 export function validate(s) {
  object(s,['schemaVersion','version','updatedAt','team','members','rounds','tasks','events','reporting','session','registry']); check([1,2].includes(s.schemaVersion),'Unsupported schema version'); check(Number.isSafeInteger(s.version)&&s.version>=0,'Invalid version'); time(s.updatedAt);
  object(s.team,['id','name','source']); id(s.team.id); text(s.team.name); provenance(s.team.source); members(s.members);
@@ -71,7 +96,7 @@ export function validate(s) {
   recordedTime(t.assignedAt); recordedTime(t.completedAt); check(t.assignedAt===null||t.assignedAt>=r.openedAt,'Task predates round');
   for(const p of t.stages) { recordedTime(p.startedAt); recordedTime(p.endedAt); check(p.startedAt===null||p.startedAt>=r.openedAt,'Stage predates round'); }
   check(!r.closedAt||t.completedAt<=r.closedAt,'Task completed after round closed');
-  check(Array.isArray(t.observations),'Invalid observations'); check(!['queued','cancelled'].includes(t.status)||t.observations.length===0,'Unstarted task cannot have observations'); t.observations.forEach(o=>{
+  check(Array.isArray(t.observations),'Invalid observations'); check(!(t.status==='queued'||(t.status==='cancelled'&&!execution))||t.observations.length===0,'Unstarted task cannot have observations'); t.observations.forEach(o=>{
    observation(o); recordedTime(o.at); check(o.at>=r.openedAt,'Observation predates round');
    if(o.source.kind==='host-observation') {
     const b=r.members.find(m=>m.id===t.workerId).binding;
@@ -81,17 +106,18 @@ export function validate(s) {
   if(t.status==='approved') { object(t.acceptance,['actor','at','summary','evidence']); check(r.members.some(m=>m.id===t.acceptance.actor&&m.role==='Manager'),'Approval requires Manager'); time(t.acceptance.at); text(t.acceptance.summary); check(t.acceptance.at===t.completedAt && Array.isArray(t.acceptance.evidence)&&t.acceptance.evidence.length>0,'Missing acceptance'); t.acceptance.evidence.forEach(text); } else check(t.acceptance===null,'Premature acceptance');
   check(r.status!=='closed'||['approved','cancelled'].includes(t.status),'Closed round contains unfinished work');
  }
- for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
+ for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
  let previousEventAt=null;
  for(const e of s.events) { check(Object.hasOwn(fields,e.type),'Unknown audit event'); recordedTime(e.at); check(previousEventAt===null||e.at>=previousEventAt,'Events out of order'); previousEventAt=e.at; check(s.members.some(m=>m.id===e.actor),'Unknown event actor'); if(e.roundId!==undefined) check(roundIds.has(e.roundId),'Unknown event round'); if(e.taskId!==undefined) check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId),'Unknown event task'); }
  check(s.events.length===s.version,'Version/event mismatch'); check(previousEventAt===null||previousEventAt===s.updatedAt,'Last event/update mismatch');
  for(const task of s.tasks)deliveryState(s,task);
  for(const t of s.tasks.filter(t=>t.status==='cancelled')) {
-  const cancellations=s.events.filter(e=>e.type==='cancelQueued'&&e.taskId===t.id&&e.roundId===t.roundId),r=s.rounds.find(r=>r.id===t.roundId);
-  check(t.stages.length===2&&t.stages[0].status==='queued'&&t.assignedAt===null&&t.submissions===0,'Only unstarted queued tasks can be cancelled');
+  const cancellations=s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId),r=s.rounds.find(r=>r.id===t.roundId);
+  if(cancellations[0]?.type==='cancelStopped')stoppedCancellation(s,t,cancellations[0]);
+  else check(t.stages.length===2&&t.stages[0].status==='queued'&&t.assignedAt===null&&t.submissions===0,'Only unstarted queued tasks can be cancelled');
   check(cancellations.length===1&&cancellations[0].at===t.completedAt&&r.members.some(m=>m.id===cancellations[0].actor&&m.role==='Manager'),'Cancellation audit mismatch');text(cancellations[0].summary);
  }
- for(const e of s.events.filter(e=>e.type==='cancelQueued'))check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId&&t.status==='cancelled'),'Cancellation event requires cancelled task');
+ for(const e of s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)))check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId&&t.status==='cancelled'),'Cancellation event requires cancelled task');
  for(const r of s.rounds.filter(r=>r.status==='closed')) check(s.tasks.some(t=>t.roundId===r.id&&t.required),'Closed round lacks required work');
  object(s.reporting,['enabled','desired','actual','intentVersion','offlineReceipt']); check(typeof s.reporting.enabled==='boolean','Invalid reporting preference'); check(['running','stopped'].includes(s.reporting.desired)&&s.reporting.actual==='unknown','Host state cannot be confirmed by offline runtime'); check(Number.isSafeInteger(s.reporting.intentVersion)&&s.reporting.intentVersion>=0&&s.reporting.intentVersion<=s.version,'Invalid report intent');
  check(s.reporting.desired===(s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'),'Inconsistent reporting intent');
@@ -135,6 +161,7 @@ fields.assign.push('caller');
 fields.enqueue=[...fields.assign];
 fields.startTask=['roundId','taskId','caller'];
 fields.cancelQueued=['roundId','taskId','caller','summary'];
+fields.cancelStopped=['roundId','taskId','caller','summary','cancellation'];
 fields.deliveryCheck=['roundId','taskId','caller','attemptId','outcome','summary'];
 fields.deliveryClaim=['roundId','taskId','caller','attemptId','summary'];
 export function evolve(state,e,expectedVersion) {
@@ -147,7 +174,7 @@ export function evolve(state,e,expectedVersion) {
  const t=e.taskId?s.tasks.find(t=>t.id===e.taskId&&t.roundId===e.roundId):null;
  if(e.type!=='openRound'&&e.roundId) check(r?.status==='open','Round unavailable or closed');
  if(e.taskId&&!['assign','enqueue'].includes(e.type)) { check(t,'Task missing'); check(manager||(actor.role==='Worker'&&actor.id===t.workerId),'Worker ownership mismatch'); }
- if(['enqueue','startTask','cancelQueued','admitRegistryMember',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
+ if(['enqueue','startTask','cancelQueued','cancelStopped','admitRegistryMember',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
  check(t?.status!=='cancelled','Cancelled task immutable');
  if(t?.status==='queued')check(['startTask','cancelQueued'].includes(e.type),'Queued task must start before work');
  if(e.type==='submit') check(actor.role==='Worker'&&actor.id===t.workerId,'Only assigned Worker can submit');
@@ -227,6 +254,7 @@ export function evolve(state,e,expectedVersion) {
    break; // Audit projection validates attempt lineage and outcome after append.
   }
   case 'cancelQueued': check(t.status==='queued','Only queued tasks can be cancelled');text(e.summary);transition('cancelled');t.completedAt=e.at;break;
+  case 'cancelStopped': check(t.status==='executing','Only initial executing work can be withdrawn');assignedWorker(t.workerId);stoppedCancellation(s,t,e);transition('cancelled');t.completedAt=e.at;break;
   case 'submit': text(e.summary); check(['executing','rework'].includes(t.status),'Submission not allowed'); transition('submitted'); t.submissions++; break;
   case 'review': check(t.status==='submitted','Review requires submission'); transition('reviewing'); break;
   case 'rework': text(e.summary); check(t.status==='reviewing','Rework requires review'); transition('rework'); break;
@@ -241,7 +269,7 @@ export function evolve(state,e,expectedVersion) {
  }
  s.version++; s.updatedAt=e.at;
  if(['openRound','closeRound','reports'].includes(e.type)) { s.reporting.desired=s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'; s.reporting.intentVersion=s.version; s.reporting.offlineReceipt=null; }
- const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=e[k]; if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
+ const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=structuredClone(e[k]); if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
  return validate(s);
 }
 function freeze(x) { if(x&&typeof x==='object') { Object.values(x).forEach(freeze); Object.freeze(x); } return x; }

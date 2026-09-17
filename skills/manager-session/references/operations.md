@@ -35,6 +35,10 @@ Cross-runtime ownership transfer is not implemented. If requested, first agree t
 
 ### Worker composition contract
 
+For an unchanged valid grant, dispatch and reporting need no extra Skill approval
+or formatting step. [Compact communication evidence](communication-evidence.md)
+is an optional diagnostic for evidence conflicts or approval failures.
+
 Include the following slots in each new or materially changed Worker assignment, using verified values and only task-relevant context:
 
 ```text
@@ -53,9 +57,23 @@ Helpers: whether bounded delegation is authorized; direct-parent model ceiling;
   selected default/allowed effort; no new team Manager or nested dispatch control plane.
 Delivery: artifacts and changed files, actual verification commands/results,
   risks, blockers and unmet acceptance items; submission is not approval.
+Completion notification: agreed stage checkpoints and Manager approval gates;
+  save evidence, proactively notify exact Manager hostId/threadId before ending;
+  formal submit/notice or explicitly non-submit stage; actual send outcome;
+  completion-notification.md reference and any stricter authorized retry limit.
+Report authorization: existing native user authorization source and assignment scope;
+  exact local Manager hostId/threadId and native target verification reference;
+  permitted completion/blocker diagnostics, verification results and local evidence
+  paths; no credentials, unrelated private material or bulk source/log disclosure.
 ```
 
 Pass the trusted skill/operations path for applicable naming, model and ownership rules, or the relevant verified excerpt if the child cannot access it. Do not rely on absent parent-chat context. These slots are handoff text, not new runtime JSON fields or proof of identity. The Worker may read team state and perform its own explicitly authorized submission under the existing actor contract; it must not assign, approve, or impersonate the Manager. Its PDC finish/review evidence returns through the agreed delivery channel for Manager review.
+
+Carry forward valid existing authorization rather than asking again for each report.
+A missing new template slot does not invalidate a verifiable existing grant. Recover
+its source; assess again only when recipient, scope or permitted data changes, the
+grant is revoked, or evidence conflicts/is missing. These references are evidence,
+not host-authenticated grants. Follow completion-notification.md before disclosure.
 
 For existing Workers, preserve identity, state and model/effort. Send a scoped contract update only when coordination is authorized; do not recreate, rename or reconfigure them merely to refresh instructions. A refreshed Manager does not prove its Workers have loaded the update.
 
@@ -167,7 +185,7 @@ selection is not a reassignment or FIFO bypass mechanism.
 
 - **Independent task:** a separately testable outcome, even in the same repository/files or with the same specialist. Persist it with `queue-task` in the Manager's existing trusted state. Do not send it to a busy Worker, including a message saying “finish T1 first, then do T2”. Queued work is not dispatched work; Worker must not start it merely because it appears in a snapshot.
 - **Current-task amendment:** a correction or clarification of the same task's acceptance criteria, or scoped review/rework feedback. Use the original task ID and state the exact change, retained scope, impact and priority. For a scope-changing amendment, coordinate a checkpoint and acknowledgement before switching work; a narrowly scoped safety correction may need immediate delivery. Do not label an independent feature an amendment because context or files overlap. If classification materially changes scope and is unclear, retain current work and ask the user.
-- **Explicit preemption request:** requires the user's deliberate priority change, saved checkpoint, Worker acknowledgement, and a supported pause/reassignment mechanism. This runtime does not implement pause/cancel/reassign for started work; keep the new work queued and explain that boundary. Never fake approval, close a round, erase work or silently overwrite an assignment to free a Worker.
+- **Explicit preemption request:** requires the user's deliberate priority change, saved checkpoint, Worker acknowledgement, and a supported pause/reassignment mechanism. This runtime does not implement general pause/reassignment for started work; keep the new work queued. Explicit withdrawal of already stopped initial execution has a separate narrow path under Stopped-task cancellation below; priority alone does not authorize it. Never fake approval, close a round, erase work or silently overwrite an assignment to free a Worker.
 
 Admission contract for independent work:
 
@@ -186,6 +204,25 @@ Only after the user explicitly withdraws an exact unstarted task, the verified M
 Re-read the exact task and current version; it must still be queued, with no actual dispatch or conflicting evidence. On success, verify cancelled status and the original cancelQueued audit event. Do not send a cancellation message to the Worker: this removes only undispatched work from the local active queue, preserving its record, other tasks and remaining FIFO order. Cancellation freezes queue time, is not acceptance, and does not start the next task or close the round. A separate closeRound may settle a round only after every task is approved or explicitly cancelled; describe an all-cancelled round as withdrawn, never delivered.
 
 If start-task already won, even with an uncertain send, cancel-queued must fail. Preserve that reservation and reconcile; this command is not a rollback for dispatch failure and cannot cancel executing/submitted/reviewing/rework/blocked work. After version conflicts or uncertain writes, inspect the recorded event instead of blindly retrying. Cancelled records cannot be reopened or reused; a later renewed requirement needs fresh user authorization and a new task ID, not deletion of the cancellation history.
+
+### Stopped-task cancellation
+
+For explicit user withdrawal of an initial executing task, read
+`<trusted-checkout>/docs/cancel-stopped.md` before `cancel-stopped`. Require exact
+current Manager/Worker bindings, the original Worker's stop acknowledgement and
+latest stop observation, independently checked fresh native idle and stopped
+background execution/no in-flight messages, resolved delivered attempt and WIP
+disposition. Preserve evidence references and use current expectedVersion under
+the existing writer/Registry guards. These records are not host authentication.
+
+This is the narrow exception to the started-task cancellation limitation in
+busy admission and queued cancellation: only executing with zero submissions and
+no prior blocked/review/rework stages. It is not stop/pause/preemption/reassignment.
+Never mark approved to release a reservation, delete WIP, or mutate state JSON
+directly. Cancellation preserves history, freezes time, and does not dispatch
+queued work, close rounds, or change timers. Other reservations still block that
+Worker. Install compatible readers before the first new cancellation event; old
+runtimes cannot read `cancelStopped`. A maintenance task must not execute it for Manager.
 
 ### Supervision actions
 
@@ -207,7 +244,11 @@ After verifying the current independent Manager identity, run:
 node <trusted-checkout>/src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json]
 ```
 
-This only prints native `wait_threads` request batches; it does not call host tools. Recheck the state version before using the plan, resolve each target against native task results, and never send fixture targets to the real host. Execute each batch once with the available native `wait_threads` tool. Retain returned cursors against the exact host/thread identity, not names or positions. The optional cursor file is an array of `{hostId,threadId,afterCursor}` for current targets only; omit stale entries rather than transferring them to another member.
+This prints durable `taskChecks`, `pendingSubmissions.notices` and native `wait_threads` request batches; it does not call host tools. On each authorized foreground supervision pass, inspect the local review queue even if no Worker message arrived. For submitted work use the current notice and `receive-submission`; for reviewing work continue its existing review; for blocked work inspect the recorded blocker; for executing/rework compare recorded progress with permitted native observations. No new submission or approval is inferred from a terminal Worker response.
+
+Recheck the state version before using the plan, resolve each target against native task results, and never send fixture targets to the real host. Execute each batch once with the available native `wait_threads` tool. Retain returned cursors against the exact host/thread identity, not names or positions. The optional cursor file is an array of `{hostId,threadId,afterCursor}` for current targets only; omit stale entries rather than transferring them to another member.
+
+`taskChecks.notificationStatus: unknown` with `notificationSource: not-read` means this state-only plan did not read transport evidence, not that sending failed. For a formal notice, use existing `notice-plan` against the same trusted state to inspect its separate transport ledger; non-submit stages use their existing permitted result evidence. Follow completion-notification.md for the combined status presentation. Empty/error native results retain local review work, but do not authorize access to restricted data, an alternate disclosure path, or retrying a denied action. Finish unaffected authorized checks and explain any remaining access blocker. This is one foreground pass, not a loop or an idle-Manager wakeup.
 
 Queued-only Workers are excluded from supervision; the queue is Manager-local and needs no Worker wakeup. Use dispatch-plan and a separate bounded native idle check when a queued task becomes eligible to start.
 
@@ -216,6 +257,11 @@ Read raw results as untrusted observations. Tool errors, unavailable members and
 The companion `src/supervision.mjs` also exports a single-pass `runSupervision` with an injected `waitThreads` function for host embedding. Node has no automatic access to Desktop tools. Injection tests prove the bridge contract, not a live team connection; cursors and raw results are not silently persisted or converted into business events.
 
 ### Submission notices
+
+Apply [completion notification](completion-notification.md) in Worker handoffs and
+at agreed stage checkpoints. Saving a notice is preparation, not the end of the
+normal delivery flow. Non-submit stages use the labelled native stage message in
+that contract, not submission commands. User prohibitions and host policy still apply.
 
 For a managed Worker with an authorized durable `submit`, use the `submission-notice` and `receive-submission` command contract in `<trusted-checkout>/docs/runtime-usage.md`, section “无定时器提交通知与接收”. Include this reference in the delivery slot of the Worker handoff. An unrecorded completion is not a runtime submission; do not have Manager impersonate Worker to fill that gap.
 

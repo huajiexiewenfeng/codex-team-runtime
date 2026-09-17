@@ -26,10 +26,10 @@ export async function run(args,output=console.log) {
   case 'detach': {if(a.length!==3||!/^\d+$/.test(a[2])) throw new Error('detach <state.json> <request.json> <expectedVersion>'); const s=await detach(a[0],await json(a[1]),Number(a[2])); output(`Detached Liaison at version ${s.version}; no host actions`); break;}
   case 'resume': {if(a.length<2||a.length>4) throw new Error('resume <state.json> <caller.json> [asOf] [roundId]'); output(JSON.stringify(await resume(a[0],await json(a[1]),a[2]??now(),a[3]??null),null,2)); break;}
   case 'register-worker': {if(a.length!==3||!/^\d+$/.test(a[2])) throw new Error('register-worker <state.json> <request.json> <expectedVersion>'); const s=await registerWorker(a[0],await json(a[1]),Number(a[2])); output(`Registered local Worker record version ${s.version}; no task created`); break;}
-  case 'queue-task': case 'start-task': case 'cancel-queued': {
+  case 'queue-task': case 'start-task': case 'cancel-queued': case 'cancel-stopped': {
    if(a.length!==3||!/^\d+$/.test(a[2])||!Number.isSafeInteger(Number(a[2]))) throw new Error(`${command} <state.json> <request.json> <expectedVersion>`);
-   const {queueTask,startTask,cancelQueuedTask}=await import('./scheduling.mjs');
-   const s=await ({'queue-task':queueTask,'start-task':startTask,'cancel-queued':cancelQueuedTask}[command])(a[0],await json(a[1]),Number(a[2]));
+   const {queueTask,startTask,cancelQueuedTask,cancelStoppedTask}=await import('./scheduling.mjs');
+   const s=await ({'queue-task':queueTask,'start-task':startTask,'cancel-queued':cancelQueuedTask,'cancel-stopped':cancelStoppedTask}[command])(a[0],await json(a[1]),Number(a[2]));
    output(`Recorded ${command} at version ${s.version}; no host message sent`);break;
   }
   case 'dispatch-plan': {
@@ -145,22 +145,23 @@ export async function run(args,output=console.log) {
    output(`Read-only dashboard v${manifest.sourceVersion}: ${resolve(a[1],'index.html')} (${manifest.pages.length} pages)`);break;
   }
   case 'dashboard-serve': {
-   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links]';
+   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]';
    if(!a[0]||a[0].startsWith('--'))throw new Error(usage);
-   let port=4319,codexLinks=false,seenPort=false;
+   let port=4319,codexLinks=false,seenPort=false,metricsReportPath=null;
    for(let i=1;i<a.length;i++){
     if(a[i]==='--codex-links'&&!codexLinks){codexLinks=true;continue;}
+    if(a[i]==='--metrics-report'&&metricsReportPath===null&&a[i+1]&&!a[i+1].startsWith('--')){metricsReportPath=a[++i];continue;}
     if(a[i]==='--port'&&!seenPort&&/^\d+$/.test(a[i+1]??'')){seenPort=true;port=Number(a[++i]);continue;}
     throw new Error(usage);
    }
    const {startDashboardServer}=await import('./dashboard-live.mjs');
-   const service=await startDashboardServer({statePath:a[0],port,codexLinks});
-   output(`Read-only latest workbench: ${service.url}\nVisible page checks every 5 seconds; no Agent wakeups. Ctrl+C stops this local service.`);
+   const service=await startDashboardServer({statePath:a[0],port,codexLinks,metricsReportPath});
+   output(`Read-only Team Dashboard · 任务进度 / 指标统计: ${service.url}\nVisible work tab checks every 5 seconds; metrics reads a bound report on demand, without collection. No Agent wakeups. Ctrl+C stops this local service.`);
    return service;
   }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{

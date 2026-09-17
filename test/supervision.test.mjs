@@ -20,6 +20,19 @@ function stateWith(count=1) {
  return s;
 }
 function api() {assert.equal(typeof module.planSupervision,'function','planSupervision capability missing');assert.equal(typeof module.runSupervision,'function','runSupervision capability missing');return module;}
+test('supervision retains durable review work when native observation fails and no notification arrived',async()=>{
+ const {runSupervision}=api();let s=stateWith(3);
+ for(const i of [0,1])s=evolve(s,{id:`submit-${i}`,type:'submit',actor:`w${i}`,at,source,roundId:'r1',taskId:`t${i}`,summary:`Evidence ${i}`},s.version);
+ s=evolve(s,{id:'review-1',type:'review',actor:'m',at,source,roundId:'r1',taskId:'t1'},s.version);
+ const before=structuredClone(s);
+ const result=await runSupervision(s,manager,async()=>{throw new Error('native observation unavailable');});
+ assert.equal(result.pendingSubmissions?.notices.length,1);
+ assert.equal(result.pendingSubmissions.notices[0].taskId,'t0');
+ assert.deepEqual(result.taskChecks?.map(x=>[x.taskId,x.taskStatus,x.nextAction]),[
+  ['t0','submitted','inspect-submission'],['t1','reviewing','continue-review'],['t2','executing','check-progress']]);
+ assert.ok(result.taskChecks.every(x=>x.notificationStatus==='unknown'));
+ assert.equal(result.batchResults[0].status,'error');assert.deepEqual(s,before);
+});
 test('plans exact batches of at most eight with cursor identity and no execution',()=>{
  const {planSupervision}=api(),s=stateWith(10),before=structuredClone(s);
  const cursors=[{hostId:'fixture-host',threadId:'fixture-worker-8',afterCursor:'opaque-8'}];
@@ -27,6 +40,15 @@ test('plans exact batches of at most eight with cursor identity and no execution
  assert.deepEqual(plan.batches.map(x=>x.targets.length),[8,2]);assert.ok(plan.batches.every(x=>x.timeoutMs===0));
  assert.deepEqual(plan.batches[1].targets[0],cursors[0]);assert.equal(plan.sourceVersion,s.version);assert.equal(plan.executed,false);assert.equal(plan.readOnly,true);assert.equal(plan.identityAssurance,'caller-declared');assert.deepEqual(s,before);
  assert.deepEqual(plan.team.source,source);assert.deepEqual(plan.sourceKinds,['fixture']);
+});
+test('blocked work remains actionable with empty native output and no fabricated submission',async()=>{
+ const {runSupervision}=api();let s=stateWith();
+ s=evolve(s,{id:'block',type:'block',actor:'m',at,source,roundId:'r1',taskId:'t0',summary:'Waiting for build input'},s.version);
+ const before=structuredClone(s),result=await runSupervision(s,manager,async()=>({items:[]}));
+ assert.equal(result.taskChecks[0].nextAction,'inspect-blocker');
+ assert.equal(result.taskChecks[0].taskStatus,'blocked');
+ assert.deepEqual(result.pendingSubmissions.notices,[]);
+ assert.deepEqual(s,before);
 });
 test('deduplicates historical Worker across tasks and excludes accepted work',()=>{
  const {planSupervision}=api();let s=stateWith(2);
@@ -46,6 +68,7 @@ test('rejects non-Manager, unknown/pending caller, mismatched current Worker and
 test('no unfinished work makes zero tool calls and needs no injected adapter',async()=>{
  const {runSupervision}=api();let s=stateWith(0),calls=0;
  const r=await runSupervision(s,manager,async()=>{calls++;return {};});assert.equal(calls,0);assert.deepEqual(r.batchResults,[]);assert.equal(r.executed,false);
+ assert.deepEqual(r.taskChecks,[]);assert.deepEqual(r.pendingSubmissions.notices,[]);
  assert.deepEqual((await runSupervision(s,manager)).batchResults,[]);
 });
 test('executes each batch once and preserves unknown raw results without business changes',async()=>{

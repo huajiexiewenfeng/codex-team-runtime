@@ -6,23 +6,44 @@ import {readState} from './store.mjs';
 import {snapshot} from './runtime.mjs';
 import {render} from './render.mjs';
 import {dashboardStyles} from './dashboard-styles.mjs';
+import {dailyMetricsStyles} from './metrics-daily-export.mjs';
+import {readDashboardMetrics} from './dashboard-metrics.mjs';
 
 const shell=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Team Runtime · 最新工作台</title><link rel="stylesheet" href="/dashboard.css"><script type="module" src="/dashboard-client.mjs"></script></head><body>
+<header class="portal-header"><div class="brand"><span class="brand-mark" aria-hidden="true">tr</span>codex team runtime <span class="pill neutral">只读团队工作台</span></div><span id="portal-team" class="mono">等待团队连接</span></header>
+<div class="portal-tabs" role="tablist" aria-label="团队工作台"><button type="button" id="work-tab" role="tab" aria-controls="work-panel" aria-selected="true" tabindex="0">任务进度</button><button type="button" id="metrics-tab" role="tab" aria-controls="metrics-panel" aria-selected="false" tabindex="-1">指标统计</button></div>
+<section id="work-panel" role="tabpanel" aria-labelledby="work-tab">
 <section class="live-controls" aria-label="记录同步控制">
- <div class="live-heading"><strong>最新工作台 <span class="pill neutral">只读</span></strong><span id="live-status" role="status" aria-atomic="true">正在连接本机记录服务…</span></div>
+ <div class="live-heading"><span id="live-status" role="status" aria-atomic="true">正在连接本机记录服务…</span></div>
  <div class="live-actions"><label for="live-round">工作轮次</label><select id="live-round"><option value="">全部轮次</option></select><button id="live-pause" type="button" aria-pressed="false">暂停更新</button><button id="live-refresh" type="button">立即刷新</button></div>
  <p id="live-checked" class="source">尚未读取记录。页面可见时每 5 秒检查；隐藏或暂停后停止请求。</p>
 </section><div id="live-view"><div class="live-placeholder"><h1>等待团队记录</h1><p>此服务仅更新展示，不派工、不验收、不唤醒 Agent。</p></div></div>
+</section><section id="metrics-panel" role="tabpanel" aria-labelledby="metrics-tab" hidden><div class="metrics-controls"><div><h1>指标统计</h1><p class="source">团队日报快照 · 与任务轮次筛选独立 · 不会自动采集日志</p></div><button id="metrics-refresh" type="button">重新读取报告</button></div><p id="metrics-status" role="status" class="metrics-status">选择指标统计后读取已绑定报告。</p><div id="metrics-view"></div></section>
 <noscript><p class="live-placeholder">最新工作台需要 JavaScript。仍可用 dashboard 命令导出无需脚本的离线快照。</p></noscript></body></html>`;
 const styles=dashboardStyles+`
-.live-controls{max-width:1600px;margin:0 auto;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--surface)}
+[hidden]{display:none!important}
+.portal-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 32px;background:var(--surface);border-bottom:1px solid var(--line)}
+.portal-tabs{display:flex;gap:8px;padding:0 32px;background:var(--surface);border-bottom:1px solid var(--line)}
+.portal-tabs button{min-height:48px;padding:10px 20px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font:inherit;font-weight:600}
+.portal-tabs button[aria-selected="true"]{border-bottom-color:var(--accent);color:var(--accent)}.portal-tabs button:hover{background:var(--accent-soft)}
+#metrics-panel{max-width:1600px;margin:auto;padding:24px 32px}.metrics-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.metrics-controls h1{font-size:24px}.metrics-controls button{font:inherit;min-height:44px;padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--accent);cursor:pointer}.metrics-status{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+#live-view .layout{grid-template-columns:148px minmax(0,1fr)}#live-view main{padding:20px 24px}#live-view .rail{padding:20px 8px}#live-view .rail-note{margin-top:24px}
+#live-view .heading{margin:0 0 16px}#live-view .heading h1{font-size:26px}#live-view .eyebrow{font-size:11px}
+#live-view #overview{display:flex;flex-direction:column}#live-view .source-banner{order:3;margin:0 0 16px;background:transparent;border:0;padding:0}#live-view .source-banner span{display:inline;margin-left:8px}
+#live-view .metrics{margin-bottom:12px;padding:16px 0}#live-view .round-timing{order:2;margin:0 0 12px;padding:0 12px}#live-view .metric>strong{font-size:30px}
+#live-view .task{padding:16px 20px 0}#live-view .task-description{margin:10px 0}#live-view .columns{gap:20px}
+.live-controls{max-width:1600px;margin:0 auto;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--surface);display:flex;align-items:center;flex-wrap:wrap;gap:4px 20px}.live-heading{order:2;flex:1 1 340px}.live-controls .live-actions{margin-top:0;flex:1 1 540px}.live-controls #live-checked{flex-basis:100%;margin:0}
 .live-heading,.live-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.live-heading{justify-content:space-between}.live-heading>strong{font-size:15px}.live-heading .pill{margin-left:8px}
 #live-status{font-size:13px;color:var(--accent);overflow-wrap:anywhere}#live-status[data-state="unavailable"],#live-status[data-state="unauthorized"]{color:var(--amber)}
 .live-actions{margin-top:12px;font-size:13px}.live-actions select{min-width:0;max-width:100%;flex:1 1 220px;font:inherit;min-height:44px;padding:8px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px}
 .live-actions button{min-height:44px;padding:8px 14px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);border-radius:8px;cursor:pointer}.live-actions button:hover{background:var(--bg)}.live-actions button:disabled{cursor:wait;color:var(--muted);border-color:var(--line);background:var(--bg)}
 .live-actions select:focus-visible{outline:3px solid var(--accent);outline-offset:3px}.live-placeholder{max-width:900px;margin:48px auto;padding:24px}.live-controls .source{margin:8px 0 0}
 @media(max-width:760px){.live-controls{padding:16px}.live-actions label{flex-basis:100%}.live-actions select{flex-basis:100%}}
+@media(max-width:1000px){#live-view .layout{grid-template-columns:1fr}#live-view .rail{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}#live-view .rail>.eyebrow,#live-view .rail-note{display:none}}
+@media(max-width:760px){.portal-header,.portal-tabs{padding-left:16px;padding-right:16px}.portal-header .brand{flex-wrap:wrap}#metrics-panel,#live-view main{padding:16px}#live-view .columns{grid-template-columns:1fr}.live-controls .live-actions{flex-basis:100%}.live-actions label{flex-basis:auto}.live-actions select{flex-basis:160px}#live-view .heading{gap:12px;flex-wrap:wrap}}
 @media print{.live-actions{display:none}}
+.live-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,340px);gap:4px 20px}.live-controls .live-actions{grid-column:1;grid-row:1}.live-controls .live-heading{order:0;grid-column:2;grid-row:1}.live-controls #live-checked{grid-column:1/-1;grid-row:2}
+@media(max-width:1000px){.live-controls{grid-template-columns:1fr}.live-controls .live-heading{grid-column:1;grid-row:3}.live-controls #live-checked{grid-row:2}}
 `;
 const securityHeaders={
  'Cache-Control':'no-store',
@@ -34,12 +55,15 @@ const securityHeaders={
 };
 
 // Dependencies are programmatic test seams, never accepted through HTTP or request JSON.
-export async function startDashboardServer({statePath,port=4319,codexLinks=false,read=readState,now=Date.now,cacheMs=1000}={}) {
+export async function startDashboardServer({statePath,metricsReportPath=null,port=4319,codexLinks=false,read=readState,now=Date.now,cacheMs=1000}={}) {
  if(typeof statePath!=='string'||!statePath.trim())throw new Error('dashboard-serve requires a state path');
+ if(metricsReportPath!==null&&(typeof metricsReportPath!=='string'||!metricsReportPath.trim()))throw new Error('Invalid metrics report path');
+ const metricsPath=metricsReportPath===null?null:resolve(metricsReportPath);
  if(!Number.isInteger(port)||port<0||port>65535)throw new Error('Invalid dashboard port');
  if(typeof codexLinks!=='boolean'||!Number.isFinite(cacheMs)||cacheMs<0||cacheMs>1000)throw new Error('Invalid dashboard options');
  const path=resolve(statePath),token=randomBytes(32).toString('hex'),credential=Buffer.from(`Bearer ${token}`);
  const client=await readFile(new URL('./dashboard-client.mjs',import.meta.url),'utf8');
+ const tabsClient=await readFile(new URL('./metrics-daily-tabs.mjs',import.meta.url),'utf8');
  let origin,host,cached,readAt=0,inflight=null,teamId=null,closed=false;
  const current=async()=>{
   if(cached&&now()-readAt>=0&&now()-readAt<cacheMs)return cached;
@@ -62,10 +86,15 @@ export async function startDashboardServer({statePath,port=4319,codexLinks=false
   // Refuse absolute-form targets and ambiguous query parameters; there is no file browser.
   if(!req.url?.startsWith('/')||req.url.startsWith('//'))return error(400,'invalid_target');
   let url;try{url=new URL(req.url,origin);}catch{return error(400,'invalid_target');}
-  if(url.pathname==='/api/view') {
+  if(['/api/view','/api/metrics'].includes(url.pathname)) {
    if(req.headers['sec-fetch-site']&&!['same-origin','none'].includes(req.headers['sec-fetch-site']))return error(403,'foreign_site');
    const supplied=Buffer.from(req.headers.authorization??'');
    if(supplied.length!==credential.length||!timingSafeEqual(supplied,credential))return error(401,'launcher_credential_required');
+   if(url.pathname==='/api/metrics') {
+    if(url.search)return error(400,'invalid_query');
+    try{return send(200,JSON.stringify(await readDashboardMetrics(metricsPath,await current())));}
+    catch{return error(503,'metrics_unavailable');}
+   }
    if([...url.searchParams.keys()].some(key=>key!=='round')||url.searchParams.getAll('round').length>1)return error(400,'invalid_query');
    const roundId=url.searchParams.get('round')||null;
    try {
@@ -78,13 +107,15 @@ export async function startDashboardServer({statePath,port=4319,codexLinks=false
     const view=snapshot(state,asOf,roundId),etag=`"${view.snapshotId}"`;
     const headers={ETag:etag,'X-Checked-At':checkedAt};
     if(req.headers['if-none-match']===etag)return send(304,'',undefined,headers);
-    return send(200,JSON.stringify({snapshotId:view.snapshotId,sourceVersion:view.sourceVersion,registryRevision:view.registry?.teamRevision??null,asOf:view.asOf,checkedAt,roundId,rounds:state.rounds.map(({id,title,status})=>({id,title,status})),html:render(view,{live:true,codexLinks})}),undefined,headers);
+    return send(200,JSON.stringify({teamId:state.team.id,snapshotId:view.snapshotId,sourceVersion:view.sourceVersion,registryRevision:view.registry?.teamRevision??null,asOf:view.asOf,checkedAt,roundId,rounds:state.rounds.map(({id,title,status})=>({id,title,status})),html:render(view,{live:true,embedded:true,codexLinks})}),undefined,headers);
    }catch{return error(503,'source_unavailable');}
   }
   if(url.search)return error(400,'invalid_query');
   if(url.pathname==='/')return send(200,shell,'text/html; charset=utf-8');
   if(url.pathname==='/dashboard.css')return send(200,styles,'text/css; charset=utf-8');
   if(url.pathname==='/dashboard-client.mjs')return send(200,client,'text/javascript; charset=utf-8');
+  if(url.pathname==='/metrics-daily-tabs.mjs')return send(200,tabsClient,'text/javascript; charset=utf-8');
+  if(url.pathname==='/metrics.css')return send(200,dailyMetricsStyles.replace(':root',':host')+'\nmain{max-width:none;padding:0}main>h1{display:none}','text/css; charset=utf-8');
   return error(404,'not_found');
  });
  server.requestTimeout=15000;server.headersTimeout=10000;server.keepAliveTimeout=1000;

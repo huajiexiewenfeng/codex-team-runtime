@@ -4,9 +4,16 @@ import {createInterface} from 'node:readline';
 import {demoState} from '../src/demo.mjs';
 import {evolve} from '../src/runtime.mjs';
 import {startDashboardServer} from '../src/dashboard-live.mjs';
+import {mkdtemp,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {buildDailyView} from '../src/metrics-daily-export.mjs';
 
 let state=demoState(),broken=false,reads=0;
-const service=await startDashboardServer({statePath:'fixture-not-a-real-state.json',port:0,cacheMs:0,read:async()=>{reads++;if(broken)throw new Error('Fixture source unavailable');return structuredClone(state);}});
+const metricsReportPath=join(await mkdtemp(join(tmpdir(),'portal-fixture-')),'report.json');
+const report=buildDailyView(state,{schemaVersion:1,teamId:state.team.id,records:[{id:'fixture-usage',hostId:'fixture-host',threadId:'fixture-thread-manager',at:'2026-09-11T09:00:00.000Z',turnId:null,model:null,usage:{input:100,cachedInput:20,output:40,reasoningOutput:null,total:140},source:{kind:'fixture',ref:'portal-smoke'}}],links:[],diagnostics:[]},{asOf:'2026-09-11T10:00:00.000Z',from:'2026-09-11',to:'2026-09-11'});
+await writeFile(metricsReportPath,JSON.stringify(report));
+const service=await startDashboardServer({statePath:'fixture-not-a-real-state.json',metricsReportPath,port:0,cacheMs:0,read:async()=>{reads++;if(broken)throw new Error('Fixture source unavailable');return structuredClone(state);}});
 console.log(JSON.stringify({fixture:true,url:service.url}));
 const lines=createInterface({input:process.stdin,terminal:false});
 for await(const line of lines){
