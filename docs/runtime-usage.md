@@ -42,7 +42,7 @@ node src/cli.mjs dashboard <state.json> <new-output-directory> [asOf] [--codex-l
 一个入口、两个页签；可选 `--metrics-report` 绑定本团队 `metrics-daily-export` 输出的 `report.json`。指标内部继续分为 Token / MCP 页签，标注独立的数据时间与覆盖缺口；没有文件时明确未接入，不自动扫描日志。详见 [统一工作台](dashboard-portal.md)。
 
 ```text
-node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]
+node src/cli.mjs dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>] [--timeline-index <index.json> | --timeline-report <report.json>]
 ```
 
 只监听本机，前台运行，Ctrl+C 停止。使用命令返回的完整启动链接；schema 2 按原 Registry 配置提供本次进程的 `CODEX_TEAM_CONTEXT_PYTHON`。页面可见时约每 5 秒请求当前 Node + Registry 投影，隐藏 / 暂停 / 关闭后停止新请求。无 Agent 唤醒、无后台扫描、无业务写入。断连保留上次成功视图并警告；服务重启需要新的启动链接。默认端口 4319，`--port 0` 可为多团队分配空闲端口。
@@ -244,7 +244,7 @@ schemaVersion 保持 1，新增 cancelled 状态/cancelQueued 事件；旧状态
 ### 单次宿主监督查询计划（命令）
 
 ```text
-node src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json]
+node src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json] [--notifications]
 ```
 
 仅匹配 active/bound Manager，按所有开放轮次未验收任务的历史 Worker 绑定去重，生成每批最多 8 个目标、timeoutMs=0 的原生 wait_threads 参数。没有开放待验收工作时不生成查询。caller 仍是声明，Skill 需另行验证当前任务身份；cursors 是精确 `{hostId,threadId,afterCursor}` 数组，不接受错配或重复记录。
@@ -256,12 +256,19 @@ node src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json]
 `supervision-plan` 同时返回 `taskChecks`（业务状态及下一步检查）和
 `pendingSubmissions.notices`（权威 state 中待审提交）。原生查询失败或没有收到消息不清空这些待审事项。
 Manager 在已授权前台监督中检查 submitted / reviewing / blocked；接收、检查和验收仍为独立动作。
-计划不读取通知账本，所以 `notificationStatus: unknown`、`notificationSource: not-read` 不能解释成发送失败。
-正式通知的实际发送结果用原 `notice-plan` 单独核对，非正式阶段使用原获准保存的结果证据。
+`recoverySummary` 汇总有效任务的 pendingReview / reviewing / blocked，并将身份异常单列 identityBlocked。
+任务级 Worker 绑定异常只隔离该行：`nextAction: reconcile-identity`、worker=null，不产生原生目标或可接收 notice；被隔离的提交列在 `pendingSubmissions.blockedTaskIds`。其他有效任务继续返回。
+团队 Manager 权威冲突、状态完整性失败和 Registry 投影失败仍终止整次计划；接收、派发和验收写入规则没有放宽。
+默认不读取通知账本，`notificationStatus: unknown`、`notificationSource: not-read` 不能解释成发送失败。
+可选 `--notifications` 只读取真实 state 路径对应的现有 `.submission-notices.json`，核对团队、路径和最新提交后合并记录结果。
+`notice-ledger` 表示已读记录；`not-recorded` 表示没有该次提交的记录，状态仍 unknown；`read-error` 会保留待审清单并在 `notificationRead` 报告错误。身份隔离行保持 not-read。
+记录中的 accepted 只表示传输接受，不等于 Manager 已接收、审查或验收。两份文件不是原子快照，行动前需重新核对版本。
+该选项不创建账本、不发送、不启动原生查询；重试决策仍用原 `notice-plan`，非正式阶段使用原获准保存的结果证据。
 该功能不保证自动唤醒，不新增计时器、不放宽任何宿主权限，也不允许绕过拒绝搬运受限内容。
 
 ```text
-node src/cli.mjs submission-notice <state.json> <worker-caller.json> <taskId>
+node src/cli.mjs submission-notice <state.json> <worker-caller.json> <taskId> [--notice-out <new-notice.json>]
+node src/cli.mjs notice-request <notice.json> <fields.json> <new-request.json>
 node src/cli.mjs receive-submission <state.json> <manager-caller.json> <notice.json> <eventId> <expectedVersion> [at]
 ```
 
@@ -398,3 +405,76 @@ node skills/manager-session/scripts/status.mjs --runtime-root <trusted-checkout>
 ```
 
 在当前 shell 中正确引用含空格路径。status 脚本只读取状态并打印同源快照，不创建输出文件、不发送消息、不启定时器，无需当前角色身份。start/attach/register-worker/resume 是已实现的本地角色入口；实际身份适配、自动恢复 hook、后台监督与真实汇报启停仍未实现，不能把本地记录当作现场能力证明。
+## 只读任务时间线（M1 基础版）
+
+现有工作台在「指标统计」内并列提供「Token 使用量」「MCP 调用情况」「任务时间线」三个 Tab，独立读取：
+
+```powershell
+node src/cli.mjs dashboard-serve state.json --timeline-report timeline-output/report.json
+```
+
+可重复传入 `--timeline-report <report.json>`，最多 32 份，每个任务只能绑定一份报告。任务卡的“查看时间线”会打开指标页并精确选择该任务；也可用任务下拉框切换。未绑定任务不会回退到其他任务的报告。单份文件不可用会显示数量提示；重复绑定同一任务则拒绝展示，避免猜测版本。切换任务只读已有报告，不重新加载 Token/MCP 日报，不采集日志。
+
+推荐用索引实现按需加载，替代旧入口的逐文件扫描及 32 份上限：
+
+```powershell
+node src/cli.mjs dashboard-serve state.json --timeline-index timeline-index.json
+```
+
+```json
+{"schemaVersion":1,"teamId":"example-team","reports":[{"taskId":"task-1","path":"reports/task-1.json"}]}
+```
+
+`path` 相对索引文件目录解析；索引来自启动配置，HTTP 不接受路径。索引最大 4 MiB / 10000 条，单份报告最大 16 MiB。索引与 `--timeline-report` 互斥，错团队/重复任务索引拒绝读取。导航只显示绑定事实，报告内容是否可用在选中后验证；`checkedReports` 表示本次实际核对报告数，而不是全队报告健康度。
+
+- **重新读取历史报告**：读取原有文件，不生成新采样，也不覆盖原快照。
+- **更新阶段数据**：认证 GET `/api/timeline?task=<id>&refresh=state`，绕过短期状态缓存，从最新台账确定性重建所选任务的阶段，仅用于本次展示，不写入报告或业务台账。没有历史报告也可以更新阶段；损坏/身份不匹配的报告不用于工具观测，错误单独显示。
+- 阶段展示台账版本、台账更新时间、本次生成时间；工具观测保留原采样窗口及最后观测事件（不是完整覆盖截止），未采集保持未知。更新阶段不更新 Token/MCP、不扫原生日志、不调用 LLM、不唤醒 Agent。
+- 任务切换保持当前历史/阶段更新模式；点击「重新读取历史报告」返回历史模式。页面重新打开默认历史模式，按需点击更新。
+
+时间线清单可选 `nativeSources`，用于导入宿主 `read_thread` 返回中的明确内部调用证据。先保存白名单元数据（`schemaVersion`、`thread.id/hostId`、`turns[].id/items[]`；item 仅保留 `id/type/status/durationMs/exitCode/tool`），不要保存对话、命令、参数或输出正文。再指定：
+
+```json
+{"nativeSources":[{"path":"native-metadata.json","sourceRef":"native-worker","hostId":"local","threadId":"worker-thread","role":"Worker","turnId":"selected-turn","itemIds":["selected-command-item"]}]}
+```
+
+该片段需合入已有含 teamId、taskId、sources 的清单。身份和角色必须匹配一个显式日志来源；条目选择是分析者给出的任务关联，不代表自动识别或完整覆盖。文件来源真实性仍需核验，哈希仅保证可复现。导入后，“宿主内部调用报告”独立显示报告耗时，不虚构起止时间、不与外层调用相加。旧报告兼容，不需要给 Worker 增加汇报动作。
+
+### 时间线的半自动评估（只读候选）
+
+```powershell
+node src/cli.mjs task-eval timeline-output/report.json evaluation-output
+```
+
+输入是既有 v2/v3 时间线报告（最大 32 MiB），输出目录必须不存在。生成 `evaluation.json`、`evaluation.md` 与最后写入的 `READY.json`，保留输入 SHA256，不修改输入。确定性筛选每类最多 3 项较长声明阶段/未归因间隔，保留证据引用、假设、目标与护栏、单一差异、验证和处置框架。空档不等于模型思考或浪费，阶段和工具不可相加。无候选不等于高效；单样本不计算节省或宣布改善。此命令不联网、不发消息、不改 Skill、不启用实验；人工根因判断及跨样本效果比较尚待完成。当前评估输出为 JSON/Markdown，尚未绑定工作台。
+
+页面选择任务时间线或点击「重新读取历史报告」时读取已绑定文件；点击「更新阶段数据」时只重建最新台账阶段，不采集原始日志。服务验证团队与任务身份，复用原有本机认证；读取失败不影响业务任务。报告业务状态版本落后时提示历史快照。支持任务卡直达、多任务选择、业务阶段、观测事件、外层调用、脚本续接、报告耗时及未知间隔；每表展示最多 300 条，完整历史数据见 JSON。尚未自动采集新的原生日志，也未自动持久化本次阶段展示。
+
+```powershell
+node src/cli.mjs task-timeline timeline-manifest.json new-output-directory
+```
+
+显式清单示例（相对路径基于清单文件目录；不扫描其他日志）：
+
+```json
+{
+  "teamId": "example-team",
+  "taskId": "example-task",
+  "timeZone": "Asia/Shanghai",
+  "sources": [{
+    "path": "worker.jsonl",
+    "sourceRef": "worker",
+    "hostId": "local",
+    "threadId": "actual-thread-id",
+    "role": "Worker",
+    "from": "2026-09-18T00:00:00.000Z",
+    "to": "2026-09-19T00:00:00.000Z"
+  }]
+}
+```
+
+可选 `milestones.request` / `milestones.delivery` 使用 `{ "sourceRef": "worker", "line": 123 }` 引用已核对的物理日志行；缺少任一端不计算端到端耗时。角色与任务关联由清单人工圈定，不能作为 Registry 身份认证。输出 `report.json`、`timeline.md`，最后写入 `READY.json`；目录必须不存在，不覆盖旧报告。
+
+仅保存元数据，不保存对话正文、工具参数、工具正文或隐藏推理。v2 支持明确 cell ID 的脚本续接，以及结构化工具返回中的报告耗时；脚本结束不等于内部进程结束，报告耗时不与外层跨度相加。报告始终标为部分覆盖：尚未支持内部进程完整起止关联和 Dashboard 展示。采集不是业务必经步骤，不会发送消息、唤醒 Agent、启动定时器或修改团队状态。
+
+可选业务状态来源（v3）：在清单顶层增加 `"stateSource": {"path": "state.json", "roundId": "round-1"}`。只读原始状态文件（最大 16 MiB），不刷新 Registry；校验 team/round/task 一致，导出完整任务的阶段与事件元数据，不导出任务标题、报告正文、产物路径或验收证据内容。业务时间放在 `businessTimeline`，标记 `declaredAt`，与日志 `observedAt` 分列。任务状态历史不受日志采样时间窗裁剪，不能因此声称日志完整覆盖。缺失阶段端点为 null；approved/cancelled 是终态点，不显示零耗时。报告保留状态版本、字节边界及 SHA-256，便于复核。

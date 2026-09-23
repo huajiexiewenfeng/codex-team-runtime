@@ -199,6 +199,28 @@ def test_worker_and_liaison_receive_same_team_leader_rules_and_role_duties(regis
     assert "teamMembers" not in capsules[2]
 
 
+def test_role_recall_preserves_formal_worker_delegation_boundary(registry):
+    store, path = registry
+    bootstrap(store)
+    store.manage("host-manager", "thread-manager", member_request())
+    store.manage("host-manager", "thread-manager", member_request(
+        "op-liaison", member_id="liaison", role="Liaison",
+        host_id="host-liaison", thread_id="thread-liaison", revision=2,
+    ))
+    before = path.read_bytes()
+    manager = store.read("host-manager", "thread-manager")
+    worker = store.read("host-worker", "thread-worker")
+    liaison = store.read("host-liaison", "thread-liaison")
+    assert any("must not create or direct temporary subagents" in d for d in manager["roleDuties"])
+    assert any("formal Worker" in d for d in manager["roleDuties"])
+    assert any("must not directly implement business code" in d for d in manager["roleDuties"])
+    assert any("may use authorized bounded temporary subagents" in d for d in worker["roleDuties"])
+    assert any("must not create or direct temporary subagents" in d for d in liaison["roleDuties"])
+    assert all(c["dispatchAllowed"] is False for c in (manager, worker, liaison))
+    assert store.read("unknown-host", "unknown-thread") is None
+    assert path.read_bytes() == before
+
+
 def test_exact_manager_authority_actor_team_and_request_shapes(registry):
     store, _ = registry
     bootstrap(store)

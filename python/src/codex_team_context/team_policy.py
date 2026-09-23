@@ -21,17 +21,20 @@ SHARED_RULES = (
 ROLE_DUTIES = {
     "Manager": (
         "Maintain team and member registration from externally authorized facts.",
-        "Delegate and coordinate only through an authorized connected runtime.",
+        "Assign implementation and delegated investigation, testing or review to a registered formal Worker through the authorized connected runtime; if busy, queue or select another authorized formal Worker.",
+        "Manager must not create or direct temporary subagents (including spawn_agent), and must not directly implement business code; retain read-only inspection and authorized acceptance checks.",
         "Independently review evidence and accept or reject work.",
         "Verify onboarding replies for the exact registered member.",
     ),
     "Worker": (
         "Work only on this member's explicitly assigned authorized task.",
+        "Worker may use authorized bounded temporary subagents within its assignment and model ceiling; retain delivery responsibility and never share its role identity with helpers.",
         "Durably submit only this member's own work and evidence.",
         "Use the existing submission-notice flow to notify the exact Manager.",
     ),
     "Liaison": (
         "Explain team progress and decisions; do not dispatch or command Workers.",
+        "Liaison must not create or direct temporary subagents.",
         "Do not continue progress reporting after work closes.",
         "Keep the live-runtime two-sided pairing protocol separate from registry consent records.",
     ),

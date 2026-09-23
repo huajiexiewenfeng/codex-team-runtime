@@ -16,7 +16,7 @@ function step(s, type, id, extra = {}) {
   return evolve(s, { id, type, actor: type === 'submit' ? 'w' : 'm', at,
     source: s.team.source, roundId: 'r', taskId: 't', ...extra }, s.version);
 }
-function setup(kind = 'manual') {
+function setup(kind = 'manual', submittedAt = at, summary = 'Changed a.mjs; node --test: 3 passed; not deployed.') {
   let s = createState({ teamId: 'test-team', name: 'Test', source: { ...source, kind }, members: [
     { id: 'm', role: 'Manager', name: 'Manager', lifecycle: 'active', binding: { status: 'bound', ...manager } },
     { id: 'l', role: 'Liaison', name: 'Liaison', lifecycle: 'active', binding: { status: 'bound', hostId: 'test-host', threadId: 'test-liaison' } },
@@ -24,7 +24,7 @@ function setup(kind = 'manual') {
   ] }, at);
   s = evolve(s, { id: 'open', type: 'openRound', actor: 'm', at, source: s.team.source, roundId: 'r', title: 'Round' }, s.version);
   s = step(s, 'assign', 'assign', { title: 'Task', workerId: 'w', required: true, assignedAt: at });
-  return step(s, 'submit', 'submission-1', { summary: 'Changed a.mjs; node --test: 3 passed; not deployed.' });
+  return step(s, 'submit', 'submission-1', { at: submittedAt, summary });
 }
 function prepare(s = setup(), caller = worker) {
   assert.equal(typeof api.prepareSubmissionNotice, 'function', 'Submission notice capability missing');
@@ -211,4 +211,94 @@ test('failed receive validation preserves the authoritative state bytes', async 
     await assert.rejects(api.receiveSubmissionNotice({ ...args, ...patch }));
     assert.equal(await readFile(x.statePath, 'utf8'), before);
   }
+});
+
+test('CLI saves an exact notice without shell date conversion, keeping legacy stdout', async t => {
+  for (const fraction of ['000', '100', '190', '123']) {
+    const submittedAt = `2026-09-07T10:00:00.${fraction}Z`;
+    const x = await files(t, setup('manual', submittedAt, '中文 "引号"\\路径\n第二行 😀'));
+    const caller = join(x.directory, 'worker.json'), target = join(x.directory, 'notice.json');
+    await writeFile(caller, JSON.stringify(worker));
+    const before = await readFile(x.statePath, 'utf8'), outputs = [];
+    await run(['submission-notice', x.statePath, caller, 't', '--notice-out', target], v => outputs.push(v));
+    const expected = prepare(x.s), notice = JSON.parse(await readFile(target, 'utf8'));
+    assert.deepEqual(JSON.parse(outputs[0]), expected);
+    assert.deepEqual(notice, expected.notice);
+    assert.equal(notice.submittedAt, submittedAt);
+    assert.equal(review(x.s, notice).action, 'review');
+    assert.equal(await readFile(x.statePath, 'utf8'), before);
+  }
+});
+
+test('CLI notice export never overwrites state, caller, or an existing notice', async t => {
+  const x = await files(t), caller = join(x.directory, 'worker.json'), target = join(x.directory, 'notice.json');
+  await writeFile(caller, JSON.stringify(worker));
+  await writeFile(target, 'preserve existing evidence');
+  for (const destination of [x.statePath, caller, target]) {
+    const before = await readFile(destination, 'utf8');
+    await assert.rejects(run(['submission-notice', x.statePath, caller, 't', '--notice-out', destination], () => {}), /EEXIST/);
+    assert.equal(await readFile(destination, 'utf8'), before);
+  }
+  await writeFile(caller, JSON.stringify(manager));
+  const absent = join(x.directory, 'unauthorized.json');
+  await assert.rejects(run(['submission-notice', x.statePath, caller, 't', '--notice-out', absent]), /Only assigned Worker/);
+  await assert.rejects(readFile(absent), { code: 'ENOENT' });
+});
+
+test('notice-request embeds the original nested notice without altering supplied fields', async t => {
+  const x = await files(t, setup('manual', '2026-09-07T10:00:00.190Z'));
+  const notice = prepare(x.s).notice, np = join(x.directory, 'notice.json'), fp = join(x.directory, 'fields.json');
+  const target = join(x.directory, 'request.json');
+  const fields = { caller: worker, expectedVersion: 3, expectedLedgerVersion: 5,
+    attemptId: 'original-attempt', at: '2026-09-07T10:00:01.100Z',
+    result: { outcome: 'unknown', evidence: { kind: 'observation', ref: '本地证据', detail: '未确认，不重发' } } };
+  await writeFile(np, JSON.stringify(notice)); await writeFile(fp, JSON.stringify(fields));
+  const before = await readFile(x.statePath, 'utf8'), output = [];
+  await run(['notice-request', np, fp, target], v => output.push(v));
+  assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), { ...fields, notice });
+  assert.equal(await readFile(np, 'utf8'), JSON.stringify(notice));
+  assert.equal(await readFile(fp, 'utf8'), JSON.stringify(fields));
+  assert.equal(await readFile(x.statePath, 'utf8'), before);
+  assert.match(output[0], /no state change or host message/);
+  for (const destination of [np, fp, target]) {
+    const prior = await readFile(destination, 'utf8');
+    await assert.rejects(run(['notice-request', np, fp, destination]), /EEXIST/);
+    assert.equal(await readFile(destination, 'utf8'), prior);
+  }
+});
+
+test('notice-request rejects overriding notice and unexpected fields before writing', async t => {
+  const x = await files(t), np = join(x.directory, 'notice.json'), fp = join(x.directory, 'fields.json');
+  const target = join(x.directory, 'absent.json');
+  await writeFile(np, JSON.stringify(prepare(x.s).notice));
+  for (const fields of [null, [], { notice: {} }, { statePath: x.statePath }, { options: {} }, { extra: true }]) {
+    await writeFile(fp, JSON.stringify(fields));
+    await assert.rejects(run(['notice-request', np, fp, target]), /Invalid notice request fields/);
+    await assert.rejects(readFile(target), { code: 'ENOENT' });
+  }
+  await writeFile(fp, JSON.stringify({ caller: worker }));
+  for (const value of [null, [], 'not a notice']) {
+    await writeFile(np, JSON.stringify(value));
+    await assert.rejects(run(['notice-request', np, fp, target]), /Invalid notice object/);
+  }
+});
+
+test('request preparation does not normalize a tampered timestamp or bypass durable validation', async t => {
+  const x = await files(t, setup('manual', '2026-09-07T10:00:00.190Z'));
+  const notice = { ...prepare(x.s).notice, submittedAt: '2026-09-07T10:00:00.19Z' };
+  const np = join(x.directory, 'notice.json'), fp = join(x.directory, 'fields.json'), target = join(x.directory, 'request.json');
+  await writeFile(np, JSON.stringify(notice));
+  await writeFile(fp, JSON.stringify({ caller: worker, expectedVersion: x.s.version, expectedLedgerVersion: 0 }));
+  await run(['notice-request', np, fp, target], () => {});
+  const request = JSON.parse(await readFile(target, 'utf8'));
+  assert.deepEqual(request.notice, notice);
+  assert.throws(() => review(x.s, request.notice), /Notice does not match durable submission/);
+});
+
+test('handoff CLI rejects malformed arguments before reading inputs', async () => {
+  for (const args of [
+    ['submission-notice', 'x', 'y', 't', '--notice-out'],
+    ['submission-notice', 'x', 'y', 't', '--unknown', 'z'],
+    ['notice-request'], ['notice-request', 'x', 'y'], ['notice-request', 'x', 'y', 'z', 'extra']
+  ]) await assert.rejects(run(args), /submission-notice|notice-request/);
 });

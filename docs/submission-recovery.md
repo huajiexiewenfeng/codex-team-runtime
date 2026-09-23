@@ -7,7 +7,8 @@
 ## 命令与文件
 
 ```text
-node src/cli.mjs submission-notice <state.json> <worker-caller.json> <taskId>
+node src/cli.mjs submission-notice <state.json> <worker-caller.json> <taskId> [--notice-out <new-notice.json>]
+node src/cli.mjs notice-request <notice.json> <fields.json> <new-request.json>
 node src/cli.mjs notice-track <state.json> <request.json>
 node src/cli.mjs notice-plan <state.json> <caller.json> <notice.json> [UTC-ISO-time]
 node src/cli.mjs notice-claim <state.json> <request.json>
@@ -41,6 +42,33 @@ Manager 已在获准前台检查已有提交，不代表旧消息已送达或拒
 `notice-track` 另需 `baseline: {outcome, evidence}`。
 `notice-result` 另需 `attemptId`（原 claim 返回值）及 `result: {outcome, evidence}`。
 每次成功写入返回新 `ledgerVersion`。并发、版本或锁冲突时，读取已有记录再判断，不能盲目重复写入。
+
+## 无损 JSON 交接（E03a 源码候选，未全局安装）
+
+PowerShell 的 `ConvertFrom-Json` 默认可能把 ISO 字符串转为 DateTime，重新序列化时将
+`.190Z` 改成 `.19Z`。时间相同不代表通知对象相同；嵌套 notice 也会受影响。
+不要用该往返修改完整通知/请求，也不要为通过校验重算 notificationId 或放宽匹配。
+
+在支持本选项的 Runtime 中，首次准备通知时可直接保存完整 notice：
+
+```text
+node src/cli.mjs submission-notice state.json worker-caller.json TASK_ID --notice-out notice-01.json
+node src/cli.mjs notice-request notice-01.json track-fields.json track-request-01.json
+node src/cli.mjs notice-track state.json track-request-01.json
+```
+
+`track-fields.json` 是原 track 请求除 `notice` 以外的字段，不是新的授权或证据格式。
+同一提取文件也可搭配 claim/result 的字段文件；`notice-request` 允许的顶层字段仅为
+`caller`、`expectedVersion`、`expectedLedgerVersion`、`baseline`、`attemptId`、`result`、`at`。
+禁止 fields 中提供 notice、statePath、options 或其他额外字段。
+
+- Node 直接嵌入原 notice，保留时间字符串、标识和内容；无损指 JSON 字段和值一致，不承诺空格/键序的字节一致。
+- 输出父目录须存在，文件须不存在；覆盖已有文件或输入文件会失败。生成完的请求不要再经过 shell JSON 往返；修正其他字段时，从原 notice 和更新后的 fields 生成一个新请求文件。
+- 未加 `--notice-out` 的原命令和 stdout 计划格式保持兼容。保存 notice 不登记、不领取、不发送。
+- `notice-request` 仅组装请求，不读取业务 state、刷新版本、判定调用者身份或确认宿主结果；真正的状态/身份/证据校验仍由原 track/claim/result 执行。它不会修复已被改写的 notice。
+- `expectedVersion`、账本版本、attemptId 与真实结果仍需按原流程核对。生成成功不等于版本仍新鲜，也不等于通知送达。
+
+本入口仅为下一项候选准备，E01 观察中的已安装 Runtime/Skill 不因源码增加入口而自动升级。
 
 ## 首次登记与旧通知
 

@@ -57,6 +57,8 @@ Helpers: whether bounded delegation is authorized; direct-parent model ceiling;
   selected default/allowed effort; no new team Manager or nested dispatch control plane.
 Delivery: artifacts and changed files, actual verification commands/results,
   risks, blockers and unmet acceptance items; submission is not approval.
+  Absolute artifact/version and existing required log/report paths; explicit
+  acceptance checks and any independent-test gates, rather than a generic full rerun.
 Completion notification: agreed stage checkpoints and Manager approval gates;
   save evidence, proactively notify exact Manager hostId/threadId before ending;
   formal submit/notice or explicitly non-submit stage; actual send outcome;
@@ -125,25 +127,23 @@ Re-pairing the same host/thread does not increment the reporting ledger's fixed 
 
 ### Delegation and model policy
 
-Use long-lived independent tasks for persistent Manager/Liaison roles and user-approved Workers requiring continued interaction and acceptance tracking. Use temporary collaboration subagents for bounded implementation, investigation, test analysis or independent review; do not register every helper as a team member or apply sidebar renaming tools to it. Temporary helpers use short responsibility names. A helper cannot inherit its parent's runtime role identity.
+Use long-lived independent tasks for Manager, Liaison and formal Workers. While acting as Manager, do not create or direct temporary collaboration subagents (`spawn_agent`, helper follow-ups or equivalent), including for investigation, testing and review. Delegated work goes to a registered formal Worker through existing admission and delivery flows. A temporary helper is not a formal Worker, even if named Worker. Liaison must not create or direct temporary subagents either.
 
-Manager owns scope, coordination and independent acceptance, and delegates implementation. It may inspect code and run authorized verification itself. Parallelize independent work when it saves time or improves quality; sequence dependent work. A Worker may delegate bounded subtasks within its own assignment and available host limits, while retaining responsibility for the combined delivery. Assign non-overlapping file ownership, require evidence, and review results. Do not duplicate the same work locally or create recursive delegation without a concrete benefit. Liaison's read-only role does not gain authority to direct development through helpers.
+Manager owns scope, coordination and independent acceptance; it must not directly implement business code, including small configuration fixes. It may inspect code read-only, maintain authorized coordination records and run authorized acceptance checks. Before turning a new business request into implementation, recover role/team context and select a formal Worker. If that Worker is busy, queue the work or select/create another authorized formal Worker; urgency, simplicity and missing registration do not authorize self-implementation or a helper bypass. Generic "develop" or "continue" preserves this role. Any explicit user-requested departure requires a clear scoped workflow change, not an inferred exception.
 
-| Agent type | Default model | Reasoning effort |
-| --- | --- | --- |
-| Manager | User-selected; never changed by this Skill | User-selected; preserved |
-| New long-lived Liaison/Worker | `gpt-5.6-sol` | `medium` |
-| New temporary subagent | `gpt-5.6-sol`, or suitable Terra/Luna within its parent's ceiling | `medium` unless explicitly specified |
+Only Workers may use authorized temporary helpers for bounded implementation, investigation, test analysis or review within their own assignment and host limits. Worker retains combined delivery and reporting responsibility. Assign non-overlapping file ownership, require evidence, and review results; avoid duplicated work or recursive delegation without concrete benefit. Helpers use short responsibility names, do not inherit the Worker's role identity, and are not automatically registered or renamed as team members.
 
-For this team's scheduling policy, order models as `gpt-6-astra > gpt-5.6-sol > gpt-5.6-terra > gpt-5.6-luna`. This is a user-defined ceiling, not a claim that all tasks have this quality ranking. The ceiling applies to temporary subagents relative to their **direct spawning parent**, at every nesting level. An Astra parent defaults to Sol, a Sol parent may choose Sol/Terra/Luna, a Terra parent defaults to Terra or may choose Luna, and a Luna parent uses Luna. Do not promote a child above its parent through a helper chain. Models not in this policy need an explicit user mapping; do not guess their rank from names.
+Defaults and the explicit scheduling order live only in `../config/model-policy.json`; follow [model configuration and queries](model-configuration.md) before authorized creation. Use `model-policy.mjs resolve worker` or `resolve liaison` for new formal members, including the minimum-team Worker; use `resolve subagent --parent-model <verified-direct-parent-model>` for a temporary helper. Manager remains user-selected. Settings describe requested configuration, not a verified running model.
 
-The spawning parent may autonomously choose Terra for a bounded implementation/analysis task or Luna for clear, narrow, repeatable work; use Sol for work benefiting from broader integration/review, within the ceiling. Keep reasoning effort at medium by default; this model ceiling does not impose an effort ceiling. A different effort requires explicit instructions rather than silently equating cheaper model with lower effort. Preserve existing tasks' model/effort when reusing them; ask before changing their configuration. A reused temporary helper above the current parent's ceiling cannot receive new work under this policy without an explicit user exception or a supported compliant configuration change. User-specified settings take precedence over defaults; a requested higher-tier temporary helper requires an explicit exception to the ceiling, not an inferred upgrade.
+The configured model order is a user-defined scheduling ceiling, not a claim that every task has this quality ranking. The ceiling applies to temporary subagents relative to their **direct spawning parent**, at every nesting level. If the default is above that parent, the resolver selects the parent model and reports `ceilingAdjusted: true`, preserving effort. Do not promote a child above its parent through a helper chain. Models not in this policy need an explicit user mapping; do not guess their rank from names.
+
+The spawning parent may autonomously choose a suitable configured lower model for bounded work within the ceiling. Keep reasoning effort at its configured default unless explicitly instructed otherwise; the model ceiling does not impose an effort ceiling. Preserve existing tasks' model/effort when reusing them; ask before changing their configuration. A reused temporary helper above the current parent's ceiling cannot receive new work under this policy without an explicit user exception or a supported compliant configuration change. User-specified settings take precedence over defaults; a requested higher-tier temporary helper requires an explicit exception to the ceiling, not an inferred upgrade.
 
 Before spawning, obtain the actual parent model from authoritative host context/configuration and check the host's supported model/effort combinations. Set both values through the tool's supported fields, not only in the task prompt. For authorized Desktop task creation these are `model` and `thinking`; for collaboration spawning they are `model` and `reasoning_effort`. Some collaboration hosts disallow overrides with a full-history fork: use a supported limited/no-history fork and provide the necessary task brief and evidence. Fixed-model agent types must also satisfy the selected model/effort; do not choose one that silently replaces medium with another effort.
 
-If the model cannot be set or the parent rank is unknown, do not silently inherit or claim Sol/medium. Inheritance is acceptable only when authoritative host behavior establishes that the inherited model/effort meet the selected configuration and ceiling; otherwise explain the limitation and seek a supported choice before that delegation. A tool accepting requested settings is not independent proof of the effective runtime model: retain the requested settings and any host confirmation, and mark effective settings unverified when the host exposes no confirmation. Do not retry creation merely to obtain model metadata.
+If the model cannot be set or the parent rank is unknown, do not silently substitute an older model, inherit, or claim the configured settings took effect. Inheritance is acceptable only when authoritative host behavior establishes that the inherited model/effort meet the selected configuration and ceiling; otherwise explain the limitation and seek a supported choice before that delegation. A tool accepting requested settings is not independent proof of the effective runtime model: retain the requested settings and any host confirmation, and mark effective settings unverified when the host exposes no confirmation. Do not retry creation merely to obtain model metadata.
 
-These instructions neither change global model configuration nor add model fields to business state. They do not authorize new user-visible tasks, bypass approvals, or lift host concurrency limits. Runtime currently has no deterministic model-selection validator or automatic model adapter.
+These instructions neither change global Codex model configuration nor add model fields to business state. They do not authorize new user-visible tasks, bypass approvals, or lift host concurrency limits. The standalone query script validates configuration and computes default selection only; it does not intercept native creation calls, authenticate the parent model, or verify host support.
 
 ### Team task names
 
@@ -241,14 +241,34 @@ Apply [ownership and continuation](#ownership-and-continuation) before choosing 
 After verifying the current independent Manager identity, run:
 
 ```text
-node <trusted-checkout>/src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json]
+node <trusted-checkout>/src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json] [--notifications]
 ```
 
 This prints durable `taskChecks`, `pendingSubmissions.notices` and native `wait_threads` request batches; it does not call host tools. On each authorized foreground supervision pass, inspect the local review queue even if no Worker message arrived. For submitted work use the current notice and `receive-submission`; for reviewing work continue its existing review; for blocked work inspect the recorded blocker; for executing/rework compare recorded progress with permitted native observations. No new submission or approval is inferred from a terminal Worker response.
 
+`recoverySummary` counts valid pendingReview/reviewing/blocked work and separately
+counts identityBlocked tasks. A task with `nextAction: reconcile-identity` has no
+native target or actionable notice; `pendingSubmissions.blockedTaskIds` makes
+excluded submissions explicit. Other valid tasks remain inspectable. Invalid team
+authority, state or Registry projection still rejects the whole plan. Receipt and
+mutation commands retain their existing strict validation.
+Retained cursors for a task's isolated historical identity appear in
+`ignoredCursors` and are not queried or transferred to its replacement. Unrelated,
+duplicate and malformed cursors still reject the plan.
+
 Recheck the state version before using the plan, resolve each target against native task results, and never send fixture targets to the real host. Execute each batch once with the available native `wait_threads` tool. Retain returned cursors against the exact host/thread identity, not names or positions. The optional cursor file is an array of `{hostId,threadId,afterCursor}` for current targets only; omit stale entries rather than transferring them to another member.
 
-`taskChecks.notificationStatus: unknown` with `notificationSource: not-read` means this state-only plan did not read transport evidence, not that sending failed. For a formal notice, use existing `notice-plan` against the same trusted state to inspect its separate transport ledger; non-submit stages use their existing permitted result evidence. Follow completion-notification.md for the combined status presentation. Empty/error native results retain local review work, but do not authorize access to restricted data, an alternate disclosure path, or retrying a denied action. Finish unaffected authorized checks and explain any remaining access blocker. This is one foreground pass, not a loop or an idle-Manager wakeup.
+Without `--notifications`, `notificationStatus: unknown` / `notificationSource: not-read`
+means transport evidence was not read, not failed. The flag joins only the existing
+canonical same-state notice ledger and latest exact submission: `notice-ledger`
+means recorded evidence, `not-recorded` remains unknown, `read-error` retains the
+review work with an explicit `notificationRead` error. Identity-blocked rows remain
+not-read. `accepted` is recorded transport acceptance, not Manager receipt or review.
+State and ledger reads are not an atomic snapshot; recheck before acting. No ledger
+is created and no notification is sent. Use existing `notice-plan` for retry decisions;
+non-submit stages retain their separate permitted evidence. Empty/error native results
+never authorize restricted access, alternate disclosure or denied-send retries.
+This is one foreground pass, not a polling loop or an idle-Manager wakeup.
 
 Queued-only Workers are excluded from supervision; the queue is Manager-local and needs no Worker wakeup. Use dispatch-plan and a separate bounded native idle check when a queued task becomes eligible to start.
 

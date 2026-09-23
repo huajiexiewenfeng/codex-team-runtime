@@ -45,14 +45,31 @@ export async function run(args,output=console.log) {
    if(a.length!==3)throw new Error('delivery-plan <state.json> <caller.json> <taskId>');const {planDelivery}=await import('./delivery.mjs');output(JSON.stringify(planDelivery(await readState(a[0]),await json(a[1]),a[2]),null,2));break;
   }
   case 'supervision-plan': {
-   if(a.length<2||a.length>3) throw new Error('supervision-plan <state.json> <caller.json> [cursors.json]');
-   const { planSupervision }=await import('./supervision.mjs');
-   output(JSON.stringify(planSupervision(await readState(a[0]),await json(a[1]),a[2]?await json(a[2]):[]),null,2)); break;
+   const notifications=a.at(-1)==='--notifications';
+   const inputs=notifications?a.slice(0,-1):a;
+   if(inputs.length<2||inputs.length>3||inputs.some(v=>v.startsWith('--'))) throw new Error('supervision-plan <state.json> <caller.json> [cursors.json] [--notifications]');
+   const { readSupervisionPlan }=await import('./supervision.mjs');
+   output(JSON.stringify(await readSupervisionPlan(inputs[0],await json(inputs[1]),inputs[2]?await json(inputs[2]):[],{notifications}),null,2)); break;
   }
   case 'submission-notice': {
-   if(a.length!==3) throw new Error('submission-notice <state.json> <worker-caller.json> <taskId>');
+   if(a.length!==3&&!(a.length===5&&a[3]==='--notice-out'&&a[4])) throw new Error('submission-notice <state.json> <worker-caller.json> <taskId> [--notice-out <new-notice.json>]');
    const {prepareSubmissionNotice}=await import('./submission-notice.mjs');
-   output(JSON.stringify(prepareSubmissionNotice(await readState(a[0]),await json(a[1]),a[2]),null,2));break;
+   const prepared=prepareSubmissionNotice(await readState(a[0]),await json(a[1]),a[2]);
+   // Keep protocol dates as JSON strings; shell DateTime roundtrips can change them.
+   if(a.length===5)await atomicWrite(resolve(a[4]),JSON.stringify(prepared.notice,null,2)+'\n',true);
+   output(JSON.stringify(prepared,null,2));break;
+  }
+  case 'notice-request': {
+   if(a.length!==3)throw new Error('notice-request <notice.json> <fields.json> <new-request.json>');
+   const notice=await json(a[0]),fields=await json(a[1]);
+   const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+   if(!object(notice))throw new Error('Invalid notice object');
+   const allowed=['caller','expectedVersion','expectedLedgerVersion','baseline','attemptId','result','at'];
+   if(!object(fields)||Object.keys(fields).some(key=>!allowed.includes(key)))throw new Error('Invalid notice request fields');
+   // A serialization helper, not state validation, result evidence or authorization.
+   // Operation-specific validation remains in notice-track/claim/result.
+   await atomicWrite(resolve(a[2]),JSON.stringify({...fields,notice},null,2)+'\n',true);
+   output('Prepared new notice request; no state change or host message');break;
   }
   case 'receive-submission': {
    if(a.length<5||a.length>6||!/^\d+$/.test(a[4])||!Number.isSafeInteger(Number(a[4]))) throw new Error('receive-submission <state.json> <manager-caller.json> <notice.json> <eventId> <expectedVersion> [at]');
@@ -101,6 +118,19 @@ export async function run(args,output=console.log) {
    const plan=command==='reporting-progress'?(await import('./reporting-progress.mjs')).prepareProgressReport:planReportingTick;
    output(JSON.stringify(plan(await readState(a[0]),await readReporting(a[1]),await json(a[2]),a[3],a[4]??now()),null,2));break;
   }
+  case 'task-timeline': {
+   if(a.length!==2)throw new Error('task-timeline <manifest.json> <new-output-directory>');
+   const {collectTaskTimeline,exportTaskTimeline}=await import('./task-timeline-input.mjs');
+   const report=await collectTaskTimeline(await json(a[0]),dirname(resolve(a[0])));
+   await exportTaskTimeline(report,resolve(a[1]));
+   output(`Read-only partial task timeline: ${resolve(a[1],'timeline.md')}`);break;
+  }
+  case 'task-eval': {
+   if(a.length!==2)throw new Error('task-eval <timeline-report.json> <new-output-directory>');
+   const {exportTaskEvaluation}=await import('./task-eval.mjs');
+   await exportTaskEvaluation(resolve(a[0]),resolve(a[1]));
+   output(`Read-only evaluation candidates: ${resolve(a[1],'evaluation.md')}`);break;
+  }
   case 'metrics-import': {
    if(a.length!==3)throw new Error('metrics-import <ledger.json> <source.json> <new-ledger.json>');
    const {validateUsage,mergeUsage}=await import('./metrics-usage.mjs');
@@ -145,23 +175,25 @@ export async function run(args,output=console.log) {
    output(`Read-only dashboard v${manifest.sourceVersion}: ${resolve(a[1],'index.html')} (${manifest.pages.length} pages)`);break;
   }
   case 'dashboard-serve': {
-   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>]';
+   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>] [--timeline-report <report.json> | --timeline-index <index.json>]';
    if(!a[0]||a[0].startsWith('--'))throw new Error(usage);
-   let port=4319,codexLinks=false,seenPort=false,metricsReportPath=null;
+   let port=4319,codexLinks=false,seenPort=false,metricsReportPath=null,timelineReportPath=null,timelineIndexPath=null;
    for(let i=1;i<a.length;i++){
     if(a[i]==='--codex-links'&&!codexLinks){codexLinks=true;continue;}
     if(a[i]==='--metrics-report'&&metricsReportPath===null&&a[i+1]&&!a[i+1].startsWith('--')){metricsReportPath=a[++i];continue;}
+    if(a[i]==='--timeline-report'&&a[i+1]&&!a[i+1].startsWith('--')){timelineReportPath??=[];timelineReportPath.push(a[++i]);continue;}
+    if(a[i]==='--timeline-index'&&timelineIndexPath===null&&a[i+1]&&!a[i+1].startsWith('--')){timelineIndexPath=a[++i];continue;}
     if(a[i]==='--port'&&!seenPort&&/^\d+$/.test(a[i+1]??'')){seenPort=true;port=Number(a[++i]);continue;}
     throw new Error(usage);
    }
    const {startDashboardServer}=await import('./dashboard-live.mjs');
-   const service=await startDashboardServer({statePath:a[0],port,codexLinks,metricsReportPath});
+   const service=await startDashboardServer({statePath:a[0],port,codexLinks,metricsReportPath,timelineReportPath,timelineIndexPath});
    output(`Read-only Team Dashboard · 任务进度 / 指标统计: ${service.url}\nVisible work tab checks every 5 seconds; metrics reads a bound report on demand, without collection. No Agent wakeups. Ctrl+C stops this local service.`);
    return service;
   }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, notice-request, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{

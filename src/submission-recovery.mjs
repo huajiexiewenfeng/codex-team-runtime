@@ -3,7 +3,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { atomicWrite, readRawState } from './store.mjs';
 import { withStateGuard } from './registry-projection.mjs';
-import { validateCaller } from './runtime.mjs';
+import { validate, validateCaller } from './runtime.mjs';
 import { prepareSubmissionNotice, planSubmissionReview } from './submission-notice.mjs';
 export { pendingSubmissions } from './submission-notice.mjs';
 
@@ -82,6 +82,29 @@ async function loadLedger(path, statePath, teamId) {
     return { schemaVersion: 1, statePath, teamId, version: 0, entries: [] };
   }
   return validateLedger(JSON.parse(raw), statePath, teamId);
+}
+
+// Read existing transport evidence only. Missing records remain unknown, never unsent.
+export async function readNoticeEvidence(statePath, state, caller, taskIds) {
+  validate(state); validateCaller(caller);
+  const manager=state.members.find(m=>m.role==='Manager');
+  check(manager?.lifecycle==='active'&&manager.binding.status==='bound'&&
+    isDeepStrictEqual(caller,{hostId:manager.binding.hostId,threadId:manager.binding.threadId}), 'Only current Manager may read supervision evidence');
+  const canonical=await realpath(statePath);
+  const ledger=await loadLedger(canonical+'.submission-notices.json',canonical,state.team.id);
+  const tasks=[];
+  for(const taskId of taskIds) {
+    const task=state.tasks.find(t=>t.id===taskId);
+    check(task,'Unknown supervision task');
+    const latest=state.events.findLast(e=>e.type==='submit'&&e.taskId===taskId&&e.roundId===task.roundId);
+    const matches=ledger.entries.filter(e=>e.notice.taskId===taskId&&e.notice.roundId===task.roundId&&e.notice.submissionId===latest?.id);
+    check(matches.length<=1,'Duplicate current submission evidence');
+    const entry=matches[0];
+    if(entry)planSubmissionReview(state,caller,entry.notice);
+    tasks.push({taskId,notificationStatus:entry?(entry.attempts.length?lastResult(entry.attempts.at(-1)):entry.baseline.outcome):'unknown',
+      notificationSource:entry?'notice-ledger':'not-recorded'});
+  }
+  return {tasks,ledgerVersion:ledger.version,evidenceAssurance:'caller-assessed'};
 }
 
 function checkNotice(state, caller, notice, workerOnly) {

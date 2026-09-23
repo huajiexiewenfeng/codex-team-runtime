@@ -4,9 +4,19 @@ Skill-driven team coordination for Codex
 
 面向 Codex 长期开发任务的轻量协作层，以 `manager-session` Skill 为入口，将需求沟通、团队协调、执行与独立验收分开，并通过 MCP 恢复长期对话中的团队身份。
 
-**顶级模型把关，合适模型执行；降低协作总成本，不牺牲交付质量。** 当前聚焦 GPT-6 + Codex。成本与质量收益是待对照验证的目标，不是既成承诺；详见 [North Star](NORTHSTAR.md)。
+**构建一个可观察、可评估、可持续改进的原生 Agent 团队运行时，在保持交付质量与人工可参与性的前提下，持续降低协作成本。** 当前聚焦 GPT-6 + Codex，保留“顶级模型把关，合适模型执行”的分工。成本与质量收益是待对照验证的目标，不是既成承诺；详见 [North Star](NORTHSTAR.md)。
 
 > 长期存在的是身份、状态与协作约定，不是永不停机的 Agent 循环。
+
+## 下一阶段：受控 RSI
+
+**真实任务 → Trace → Metrics → 半自动 Eval → 单项修改 → 试用对比 → 保留或回退。**
+
+用户已确认以证据驱动持续改进：每次只改变一个因素，不凭感觉修改 Skill；候选可以是规则精简、Runtime 封装或环境修复，也可以因证据不足而不修改。评估不阻塞业务交付，不自动启动定时器，不赋予生产自修改权限。
+
+当前已建立设计、优化台账和一个本地真实任务时间线基线；自动逐步骤采集、工作台时间线及自动实验管理**尚未实现**。下表仍保留历史架构基线，不将计划写成已上线能力。
+
+[RSI 设计](docs/design/team-rsi.md) · [任务时间线](docs/design/task-timeline.md) · [单变量优化台账](docs/optimization/team-flow-experiments.md)
 
 ## 当前状态
 
@@ -119,8 +129,9 @@ Skill 是按需加载的规则，不是持久数据库。MCP 提供独立记忆�
 ## 模型策略与 Skill 组合
 
 - Manager 的模型与强度由用户指定，保留用户配置。
-- 新正式 Liaison/Worker 默认 Sol / medium；临时 Subagent 默认 Sol / medium 或适合的 Terra/Luna，不超过直接父 Agent 的模型等级。复用成员不擅自改模型。
-- 模型策略是 Skill 约定，由宿主执行，不是 Node 强制校验器或性能保证。
+- 默认模型和强度统一维护在 [model-policy.json](skills/manager-session/config/model-policy.json)，不再散落在多份说明中；复用成员不擅自改模型。临时 Subagent 不超过直接父 Agent 的模型等级。
+- 可要求 Skill“查询模型配置”或“修改 Worker / subagent 的默认模型与强度”，由 [配置入口](skills/manager-session/references/model-configuration.md) 查询、定点修改并校验。`node skills/manager-session/scripts/model-policy.mjs show` 可只读查看配置。
+- 查询脚本确定性校验配置并计算默认模型选择；实际模型仍由宿主执行，不拦截原生调用，也不证明会话已使用该模型。
 - 同一受管工作只有一个调度与最终验收所有者。PDC 可提供项目知识与阶段方法，不隐式接管既有团队。
 - `task-dispatch` 保留投递即止语义；`project-task-dispatch` 有自己的控制状态。本契约下需用户明确选择，遇到已有所有者先确认非重叠范围或交接。
 - 本项目不依赖修改其他 Skill，不保证外部 Skill 自动遵守契约，也未实现跨运行层自动迁移。

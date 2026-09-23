@@ -59,11 +59,11 @@ test('deduplicates historical Worker across tasks and excludes accepted work',()
  for(const [i,e] of [{type:'submit',actor:'w1',summary:'Submitted'},{type:'review',actor:'m'},{type:'approve',actor:'m',summary:'Accepted',evidence:['fixture']}].entries()) s=evolve(s,{id:`complete-${i}`,at,source,roundId:'r1',taskId:'t1',...e},s.version);
  assert.deepEqual(planSupervision(s,manager).batches,[{targets:[{hostId:'fixture-host',threadId:'fixture-worker-0'}],timeoutMs:0}]);
 });
-test('rejects non-Manager, unknown/pending caller, mismatched current Worker and bad cursors before calls',async()=>{
+test('rejects non-Manager, unknown/pending caller and bad cursors before calls',async()=>{
  const {planSupervision,runSupervision}=api(),s=stateWith();let calls=0;const wait=async()=>{calls++;return {};};
  for(const caller of [{hostId:'fixture-host',threadId:'fixture-liaison'},{...manager,threadId:'unknown'},{...manager,threadId:'client-new-thread:123'},{...manager,verified:true}]) await assert.rejects(runSupervision(s,caller,wait));
  for(const cursors of [[{hostId:'wrong',threadId:'fixture-worker-0',afterCursor:'x'}],[{hostId:'fixture-host',threadId:'fixture-worker-0',afterCursor:''}],[{hostId:'fixture-host',threadId:'fixture-worker-0',afterCursor:'x'},{hostId:'fixture-host',threadId:'fixture-worker-0',afterCursor:'y'}]])assert.throws(()=>planSupervision(s,manager,cursors));
- const changed=structuredClone(s);changed.members.find(m=>m.id==='w0').binding.threadId='fixture-other';assert.throws(()=>planSupervision(changed,manager));assert.equal(calls,0);
+ assert.equal(calls,0);
 });
 test('no unfinished work makes zero tool calls and needs no injected adapter',async()=>{
  const {runSupervision}=api();let s=stateWith(0),calls=0;
@@ -91,5 +91,37 @@ test('closed rounds, exited Manager and pending Worker do not produce host reque
  s=evolve(s,{id:'exit',type:'exitMember',actor:'m',at,source,memberId:'m'},s.version);
  await assert.rejects(runSupervision(s,manager,()=>{throw new Error('Must not call');}),/Manager/);
  const pending=stateWith();pending.members.find(m=>m.id==='w0').binding.threadId='client-new-thread:123';pending.rounds[0].members.find(m=>m.id==='w0').binding.threadId='client-new-thread:123';
- assert.throws(()=>planSupervision(pending,manager),/Pending/);
+ const plan=planSupervision(pending,manager);assert.deepEqual(plan.batches,[]);assert.equal(plan.taskChecks[0].nextAction,'reconcile-identity');
+});
+
+test('one mismatched Worker cannot hide other submitted work or enter native targets',()=>{
+ let s=stateWith(2);
+ for(const i of [0,1])s=evolve(s,{id:`s-${i}`,type:'submit',actor:`w${i}`,at,source,roundId:'r1',taskId:`t${i}`,summary:'Evidence'},s.version);
+ s.members.find(m=>m.id==='w0').binding.threadId='fixture-other';const before=structuredClone(s);
+ const cursor={hostId:'fixture-host',threadId:'fixture-worker-0',afterCursor:'old-cursor'};
+ const result=api().planSupervision(s,manager,[cursor]);
+ assert.equal(result.taskChecks[0].nextAction,'reconcile-identity');assert.equal(result.taskChecks[0].worker,null);
+ assert.deepEqual(result.pendingSubmissions.notices.map(n=>n.taskId),['t1']);
+ assert.deepEqual(result.pendingSubmissions.blockedTaskIds,['t0']);
+ assert.deepEqual(result.batches[0].targets,[{hostId:'fixture-host',threadId:'fixture-worker-1'}]);
+ assert.deepEqual(result.recoverySummary,{pendingReview:1,reviewing:0,blocked:0,identityBlocked:1});
+ assert.deepEqual(result.ignoredCursors,[{...cursor,reason:'identity-blocked'}]);
+ assert.deepEqual(s,before);
+});
+
+test('recovery summary derives pending review, ongoing review and blockers without notification evidence',()=>{
+ let s=stateWith(3);
+ for(const i of [0,1])s=evolve(s,{id:`s-${i}`,type:'submit',actor:`w${i}`,at,source,roundId:'r1',taskId:`t${i}`,summary:'Evidence'},s.version);
+ s=evolve(s,{id:'review',type:'review',actor:'m',at,source,roundId:'r1',taskId:'t1'},s.version);
+ s=evolve(s,{id:'blocked',type:'block',actor:'m',at,source,roundId:'r1',taskId:'t2',summary:'Needs input'},s.version);
+ const result=api().planSupervision(s,manager);
+ assert.deepEqual(result.recoverySummary,{pendingReview:1,reviewing:1,blocked:1,identityBlocked:0});
+ assert.ok(result.taskChecks.every(t=>t.notificationStatus==='unknown'));
+});
+
+test('team Manager identity conflicts and corrupt state fail the whole recovery before host access',async()=>{
+ const s=stateWith(2);s.rounds[0].members.find(m=>m.id==='m').binding.threadId='fixture-old-manager';
+ await assert.rejects(api().runSupervision(s,manager,()=>assert.fail('no native call')),/Manager/);
+ const corrupt=stateWith(2);corrupt.version++;
+ assert.throws(()=>api().planSupervision(corrupt,manager));
 });

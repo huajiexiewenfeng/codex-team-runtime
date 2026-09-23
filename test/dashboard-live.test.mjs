@@ -13,6 +13,13 @@ import {startDashboardServer} from '../src/dashboard-live.mjs';
 import {run} from '../src/cli.mjs';
 
 const now=()=>Date.parse('2026-09-11T10:00:12.000Z');
+test('timeline endpoint requires auth, rejects path input and does not collect when unbound',async t=>{
+ const s=await serve(t);
+ assert.equal((await fetch(s.origin+'/api/timeline')).status,401);
+ assert.equal((await s.get('/api/timeline?path=secret')).status,400);
+ assert.equal((await (await s.get('/api/timeline')).json()).status,'not_configured');
+ const shell=await (await fetch(s.origin)).text();assert.match(shell,/timeline-view/);
+});
 async function serve(t,options={}) {
  const service=await startDashboardServer({statePath:resolve('fixture-state.json'),port:0,read:async()=>demoState(),now,cacheMs:0,...options});
  t.after(()=>service.close());
@@ -20,6 +27,21 @@ async function serve(t,options={}) {
  const get=(path='/api/view',init={})=>fetch(service.origin+path,{...init,headers:{Authorization:`Bearer ${token}`,...init.headers}});
  return {...service,token,get};
 }
+
+test('metrics workspace has persistent peer tabs including timeline without a daily report',async t=>{
+ const s=await serve(t);
+ const html=await (await fetch(s.origin)).text();
+ const template=html.match(/<template id="metrics-template">([\s\S]*?)<\/template>/)?.[1];
+ assert.ok(template,'metrics navigation must exist before either report loads');
+ for(const [id,title] of [['token','Token 使用量'],['mcp','MCP 调用情况'],['timeline','任务时间线']]){
+  assert.match(template,new RegExp(`id="${id}-tab"[^>]*role="tab"[^>]*aria-controls="${id}-panel"[^>]*>${title}`));
+  assert.match(template,new RegExp(`id="${id}-panel"[^>]*role="tabpanel"[^>]*aria-labelledby="${id}-tab"`));
+ }
+ assert.equal((template.match(/id="timeline-view"/g)||[]).length,1);
+ assert.match(template,/<section id="timeline-panel"[^>]*hidden>[\s\S]*id="timeline-view"/);
+ assert.equal((await (await s.get('/api/metrics')).json()).status,'not_configured');
+ assert.equal((await (await s.get('/api/timeline')).json()).status,'not_configured');
+});
 test('live service is idle until authenticated data requests; shell/assets disclose no team data',async t=>{
  let reads=0;const s=await serve(t,{read:async()=>{reads++;return demoState();}});
  assert.match(s.origin,/^http:\/\/127\.0\.0\.1:\d+$/);assert.match(s.token,/^[a-f0-9]{64}$/);
@@ -94,6 +116,7 @@ test('static renderer stays script-free and live presentation keeps explicit sou
  const v=snapshot(demoState(),'2026-09-11T10:00:00.000Z');
  assert.match(render(v),/固定快照 · 不会自行刷新/);assert.doesNotMatch(render(v),/<script|data-live-key/);
  const live=render(v,{live:true});assert.match(live,/最新工作台/);assert.doesNotMatch(live,/重新导出快照查看|固定快照 · 不会自行刷新/);
+ assert.match(live,/data-timeline-task="T-1"/);assert.doesNotMatch(render(v),/data-timeline-task/);
  assert.match(live,/原生任务执行状态：未接入/);assert.match(live,/data-live-key="/);assert.match(live,/Token 用量：未接入/);
  assert.throws(()=>render(v,{live:'yes'}),/live/i);
 });

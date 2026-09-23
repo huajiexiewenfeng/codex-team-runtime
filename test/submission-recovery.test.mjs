@@ -7,6 +7,7 @@ import { createState, evolve } from '../src/runtime.mjs';
 import { initialize, readState } from '../src/store.mjs';
 import { prepareSubmissionNotice, receiveSubmissionNotice } from '../src/submission-notice.mjs';
 import { run } from '../src/cli.mjs';
+import * as supervision from '../src/supervision.mjs';
 
 const api = await import('../src/submission-recovery.mjs').catch(e => {
   if (e.code !== 'ERR_MODULE_NOT_FOUND') throw e;
@@ -53,6 +54,41 @@ const plan = (x, seconds = 0) => api.planNoticeDelivery({ ...x, at: time(seconds
 const claim = (x, version, seconds = 0) => api.claimNoticeDelivery({ ...x, expectedLedgerVersion: version, at: time(seconds) });
 const record = (x, c, result, seconds = 0) => api.recordNoticeResult({ ...x, expectedLedgerVersion: c.ledgerVersion,
   attemptId: c.attemptId, result, at: time(seconds) });
+
+test('foreground supervision optionally joins existing notification evidence without sending or writing', async t => {
+ const x=await files(t);
+ assert.equal(typeof supervision.readSupervisionPlan,'function','Missing integrated foreground reader');
+ const before=await readFile(x.statePath,'utf8');
+ let p=await supervision.readSupervisionPlan(x.statePath,manager);
+ assert.equal(p.taskChecks[0].notificationSource,'not-read');
+ p=await supervision.readSupervisionPlan(x.statePath,manager,[],{notifications:true});
+ assert.equal(p.taskChecks[0].notificationStatus,'unknown');assert.equal(p.taskChecks[0].notificationSource,'not-recorded');
+ await assert.rejects(readFile(x.statePath+'.submission-notices.json'),{code:'ENOENT'});
+ await track(x,'accepted');const ledgerBefore=await readFile(x.statePath+'.submission-notices.json','utf8');
+ let out;await run(['supervision-plan',x.statePath,await callerFile(x),'--notifications'],v=>{out=JSON.parse(v);});
+ assert.equal(out.taskChecks[0].notificationStatus,'accepted');assert.equal(out.taskChecks[0].nextAction,'inspect-submission');
+ assert.equal(out.notificationRead.evidenceAssurance,'caller-assessed');
+ assert.equal(await readFile(x.statePath,'utf8'),before);assert.equal(await readFile(x.statePath+'.submission-notices.json','utf8'),ledgerBefore);
+});
+async function callerFile(x) {const p=join(x.directory,'manager.json');await writeFile(p,JSON.stringify(manager));return p;}
+
+test('invalid notification ledger is explicit unknown and never hides durable review work',async t=>{
+ const x=await files(t);assert.equal(typeof supervision.readSupervisionPlan,'function');
+ await writeFile(x.statePath+'.submission-notices.json','{"schemaVersion":1,"teamId":"other"}');
+ const p=await supervision.readSupervisionPlan(x.statePath,manager,[],{notifications:true});
+ assert.equal(p.notificationRead.status,'error');assert.equal(p.taskChecks[0].notificationStatus,'unknown');
+ assert.equal(p.taskChecks[0].notificationSource,'read-error');assert.equal(p.recoverySummary.pendingReview,1);
+ await assert.rejects(supervision.readSupervisionPlan(x.statePath,worker,[],{notifications:true}),/Manager/);
+});
+
+test('superseded send receipts do not label a new submission as delivered',async t=>{
+ const x=await files(t);assert.equal(typeof supervision.readSupervisionPlan,'function');await track(x,'accepted');
+ let s=step(x.state,'review','review');s=step(s,'rework','rework',{summary:'Changes needed'});s=step(s,'submit','submission-2',{summary:'New evidence'});
+ await writeFile(x.statePath,JSON.stringify(s));
+ const p=await supervision.readSupervisionPlan(x.statePath,manager,[],{notifications:true});
+ assert.equal(p.taskChecks[0].notificationStatus,'unknown');assert.equal(p.taskChecks[0].notificationSource,'not-recorded');
+ assert.equal(p.pendingSubmissions.notices[0].submissionId,'submission-2');
+});
 
 test('untracked or legacy-unknown notice cannot silently start a fresh retry budget', async t => {
   const x = await files(t), before = await readFile(x.statePath, 'utf8');
@@ -173,6 +209,12 @@ test('Registry projection errors and non-ready members fail closed, ready projec
   const projection = readyMemberIds => ({ registryId: 'registry', teamId: state.team.id, teamRevision: 2,
     migrationId: 'migration', statePath: x.statePath, members: state.members, readyMemberIds });
   const ready = { ...x, options: { exporter: async () => projection(['m', 'l', 'w']) } };
+  await assert.rejects(supervision.readSupervisionPlan(x.statePath,manager,[],{
+    notifications:true,exporter:async()=>{throw new Error('registry offline');}
+  }), /registry offline/);
+  const linkedPlan=await supervision.readSupervisionPlan(x.statePath,manager,[],{...ready.options,notifications:true});
+  assert.equal(linkedPlan.recoverySummary.pendingReview,1);
+  assert.equal(linkedPlan.taskChecks[0].notificationStatus,'unknown');
   await track(ready);
   for (const members of [['m', 'l'], ['l', 'w']]) {
     await assert.rejects(claim({ ...x, options: { exporter: async () => projection(members) } }, 1), /not Registry ready/);
@@ -262,4 +304,30 @@ test('CLI track/plan/claim/result and Manager pending use the real ledger withou
   await writeFile(callerPath, JSON.stringify(manager));
   assert.equal((await cli(['pending-submissions', x.statePath, callerPath])).notices.length, 1);
   for (const name of ['notice-track', 'notice-plan', 'notice-claim', 'notice-result', 'pending-submissions']) await assert.rejects(run([name]), new RegExp(name));
+});
+
+test('lossless CLI handoff feeds track, claim and result without changing notice or state', async t => {
+  const x = await files(t), callerPath = join(x.directory, 'worker.json'), noticePath = join(x.directory, 'notice.json');
+  await writeFile(callerPath, JSON.stringify(worker));
+  const before = await readFile(x.statePath, 'utf8');
+  await run(['submission-notice', x.statePath, callerPath, 't', '--notice-out', noticePath], () => {});
+  async function preparedOperation(command, fields) {
+    const fieldPath = join(x.directory, `${command}-fields.json`), requestPath = join(x.directory, `${command}-request.json`);
+    await writeFile(fieldPath, JSON.stringify({ caller: worker, expectedVersion: 3, at, ...fields }));
+    await run(['notice-request', noticePath, fieldPath, requestPath], () => {});
+    assert.deepEqual(JSON.parse(await readFile(requestPath, 'utf8')).notice, x.notice);
+    const output = [];
+    await run([command, x.statePath, requestPath], v => output.push(v));
+    return JSON.parse(output[0]);
+  }
+  const tracked = await preparedOperation('notice-track', { expectedLedgerVersion: 0, baseline: { outcome: 'not-attempted', evidence } });
+  const claimed = await preparedOperation('notice-claim', { expectedLedgerVersion: tracked.ledgerVersion });
+  const result = await preparedOperation('notice-result', { expectedLedgerVersion: claimed.ledgerVersion,
+    attemptId: claimed.attemptId, result: { outcome: 'unknown', evidence } });
+  assert.equal(result.ledgerVersion, 3);
+  const ledger = JSON.parse(await readFile(x.statePath + '.submission-notices.json', 'utf8'));
+  assert.deepEqual(ledger.entries[0].notice, x.notice);
+  assert.equal(ledger.entries[0].attempts.length, 1);
+  assert.equal(ledger.entries[0].attempts[0].observations[0].result.outcome, 'unknown');
+  assert.equal(await readFile(x.statePath, 'utf8'), before);
 });

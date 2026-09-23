@@ -54,6 +54,7 @@ export function render(v,{roundPages=[],codexLinks=false,live=false,embedded=fal
   <p class="task-description">${esc(cardSummary(t))}</p>
   <div class="task-facts"><strong>${esc(owner(t))}</strong>${t.status==='queued'?`<span>尚未开始执行</span><span>排队已等待 ${elapsed(t.phaseElapsedMs)}</span>`:t.status==='cancelled'?`<span>${t.assignedAt===null?'未执行':'已停止'} · 未验收</span><span>${t.assignedAt===null?'排队等待':'任务历时'} ${elapsed(t.assignedAt===null?t.stages[0]?.durationMs:t.elapsedMs)}</span>`:`<span>任务历时 ${elapsed(t.elapsedMs)}</span>${t.status==='approved'?`<span>验收时间 ${time(t.acceptance.at)}</span>`:`<span>当前阶段 ${elapsed(t.phaseElapsedMs)}</span>`}`}</div>
   <div class="task-foot">${t.completedAt?`<span>${t.status==='approved'?'已完成 · 以验收记录为准':`取消时间 ${time(t.completedAt)}`}</span>`:`<span class="freshness ${t.freshness==='stale'?'stale':''}">${esc({unknown:'观察时间未知',stale:'观察已陈旧',recorded:'已记录，非实时'}[t.freshness])}</span>`}<span>${t.completedAt?'完成计时冻结':'包含等待 · 截至快照时间'}</span></div>
+  ${live?`<button type="button" class="timeline-open" data-timeline-task="${esc(t.id)}">查看时间线</button>`:''}
   <details class="task-detail"${liveKey(`details-${taskId(t,index)}`)}><summary>任务详情<span aria-hidden="true"> · 阶段 / 派发 / 证据</span></summary><div class="detail-body">
    <p>${t.required?'必需交付':'可选交付'} · 提交 ${t.submissions} 次 · 原生任务执行状态：未接入</p>
    <h4>初始派发：${esc(deliveryLabels[t.delivery.status])}</h4><p>领取记录 ${t.delivery.attempts} 次，不等于实际发送次数。</p><p class="source">尝试 ID ${esc(t.delivery.attemptId)} · 核对事件 ${esc(t.delivery.evidenceEventId)}<br>派发证据与业务执行状态独立；结果未知不等于未发送。</p>

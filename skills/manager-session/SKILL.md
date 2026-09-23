@@ -1,11 +1,18 @@
 ---
 name: manager-session
-description: Use when explicitly designating a session as Manager, initializing a codex-team-runtime team, supervising or accepting team work, or recovering established Manager, Liaison and Worker roles; not ordinary coding or one-shot delivery.
+description: Use when explicitly designating a session as Manager, initializing a codex-team-runtime team, supervising or accepting team work, recovering established Manager, Liaison and Worker roles, or querying/changing this Skill's model defaults; not ordinary coding or one-shot delivery.
 ---
 
 # Manager Session — early repository companion
 
 Reading this skill does not activate a role. Status/history queries never create, message, or wake a task. This version provides executable local `start`, two-sided `attach`, Worker registration, and read-only `resume`, not an autonomous background team or persistent session hook.
+
+## Model configuration and queries
+
+For model defaults, use [model configuration](references/model-configuration.md).
+The single source is `config/model-policy.json` in this Skill directory; query it
+with `node <skill-directory>/scripts/model-policy.mjs show`. A configuration query
+or change does not activate Manager, create a team, or reconfigure existing tasks.
 
 ## Manager activation entry
 
@@ -34,6 +41,8 @@ Manager, Liaison and Workers share [the team-context contract](references/team-c
 
 Use `team_context.read` with verified **current hostId + threadId**; temporary helpers must not inherit a parent's role identity. Active context does not grant work authorization; null is unregistered, inactive is not a resumable role, and errors are not null. Current work/evidence needs its own verified source. MCP does not call itself or authenticate the caller.
 
+On Manager foreground recovery, follow [the continuation summary](references/team-context.md#foreground-manager-recovery): recover role and trusted team access, then inspect existing work through `supervision-plan` before choosing the next authorized action. This is not an automatic MCP callback or permission to interrupt the user's current question.
+
 Only Manager maintains the registry, after externally verified bootstrap/member authorization and any required consent. Members read and return onboarding receipts; Manager verifies and records them. Registered is not ready; ready is not dispatch permission or proof of future recall. `dispatchAllowed: false` means a context read never grants or executes dispatch. Unlinked teams remain `not-connected`; linked active teams report `connected` and must still pass Node admission gates. `migration-pending` blocks business operations until recovery. A user-authorized legacy cutover is performed by the original Manager following `<runtime-root>/docs/team-registry-cutover.md`, never by a developer impersonating it. For linked teams, only MCP changes current identities; Node preserves business history and checks its member projection. Legacy locator mode retains Node authority and cannot bypass linked-team errors. Setup and exact APIs: `<runtime-root>/docs/team-context.md`. No global installation, hook or timer is implied.
 
 ## Intent routing
@@ -48,7 +57,7 @@ Timers are OFF by default. Role activation, new work, "continue", and Worker com
 
 Before continuing role-dependent work or selecting another workflow skill, recover the current role and the same work's existing orchestration owner using [ownership and continuation](references/operations.md#ownership-and-continuation). Manager Session owns team scheduling and acceptance only for its verified assigned scope; PDC can supply project stages without taking that ownership. A skill call is not an ownership transfer. New Worker handoffs must carry the [Worker composition contract](references/operations.md#worker-composition-contract).
 
-Before delegation, read [delegation and model policy](references/operations.md#delegation-and-model-policy). Preserve the user's Manager model/effort; new long-lived members default to Sol/medium. Temporary subagents default to Sol/medium or a suitable lower model, never above their direct parent. These are host-executed Skill rules, not runtime-enforced settings.
+While acting as Manager, do not create or direct temporary subagents (`spawn_agent` or equivalent), or directly implement business code. Delegate through registered formal Worker tasks, including delegated investigation, testing and review; retain read-only inspection and authorized acceptance checks. Liaison must not create or direct temporary subagents. Before delegation, read [delegation and model policy](references/operations.md#delegation-and-model-policy) and resolve defaults from the model configuration above. Preserve the user's Manager model/effort and existing tasks' settings. Only Workers may use authorized bounded temporary helpers, never above their direct parent's configured model ceiling. These are host-executed Skill rules, not runtime-enforced tool restrictions.
 
 Before selecting a Worker for new work, apply [project-aware decomposition and optional PDC integration](references/project-dispatch.md). Use PDC/Base Graph when applicable and available, or requirements/source evidence without them. Select the correct project and an idle suitable Worker, or create an authorized independent Worker when useful, before choosing its queue; the initial Worker is not a team size limit. Then apply [busy Worker admission](references/operations.md#busy-worker-admission) for every assignment/follow-up. Work targeting a reserved Worker stays in the Manager-side durable queue. Sending “do this later” is not queueing. Host idle, submission, similar files and urgency do not release the reservation.
 

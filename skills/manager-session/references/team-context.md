@@ -61,6 +61,27 @@ identity, current work and authorization before contacting any of them.
   the next action requires the leader. Registry reads do not check native online
   status, so a stored active leader is not proof of availability.
 
+## Foreground Manager recovery
+
+After a successful role recall for foreground team continuation or known compaction,
+verify the same team's trusted state/runtime locators and integration barrier. An
+active connected Manager then reads `supervision-plan` once (operations.md), using
+its own verified caller. Recover `recoverySummary`, `taskChecks` and valid pending
+notices from durable state rather than chat recollection. No new todo file is needed.
+
+Submitted means inspect the current submission; reviewing means continue the existing
+review; blocked means inspect its blocker. `reconcile-identity` holds only that task:
+do not contact its replacement binding or receive/approve its old submission. A team
+authority, state integrity or Registry failure stops the entire role-dependent pass.
+Use `--notifications` only when the current question needs recorded send outcomes;
+missing or unreadable transport evidence remains unknown, not unsent or accepted.
+
+Honor the current user intent after restoring context: a question receives an answer,
+not unsolicited review, dispatch or messages. A scoped request continues only the
+authorized work. Do not repeat a current summary for each tool call. This is a Skill
+continuation rule: MCP does not invoke itself after compaction, no Hook/timer wakes
+an idle Manager, and no summary guarantees an LLM will recall without being invoked.
+
 ## Registration and onboarding
 
 For first activation, read [activation routing](activation.md): default setup is

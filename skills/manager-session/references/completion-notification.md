@@ -37,6 +37,27 @@ through the available authorized native `send_message_to_thread` channel before
 ending the completion turn; do not wait for the user to ask. Routine tool steps are
 not stage checkpoints. Preserve model/effort settings when sending.
 
+### Prompt artifact handoff
+
+When a deliverable passes the checks required for its authorized scope, promptly
+show its absolute path and version in the current user conversation, with the
+actual status: for example, “制品已就绪；团队提交/通知尚未完成，待 Manager 验收”.
+Continue the existing completion flow in the same turn; this early update is not
+an extra Manager message, submission or approval. Preserve any gate on use or
+deployment and the permitted disclosure scope.
+
+Use one concise evidence summary: artifact absolute path/version; actual checks
+and results; existing delivery note and original build/verification log absolute
+paths when present or required; remaining risks and acceptance status. Include
+the user instruction reference when the output directory changed. Do not assume
+Manager shares the Worker's cwd. Existing logs can be referenced directly; a new
+long DELIVERY.md or a rewritten log is not required for every small build. If a
+required log is unavailable, say so rather than reconstructing it as raw output.
+
+Reuse observed passing evidence for unchanged artifacts and relevant inputs.
+Repeat only affected checks after relevant changes, failures or unresolved gaps;
+writing this summary or reading a Skill does not require another full check.
+
 - **Formal submission:** the original Worker performs its authorized durable
   `submit`, including stage/version and absolute evidence paths in its summary.
   Follow [submission notices](operations.md#submission-notices) and the trusted
@@ -44,6 +65,10 @@ not stage checkpoints. Preserve model/effort settings when sending.
   send history, track, claim, send the freshly claimed unchanged `hostRequest`
   once, and record the actual result. Do not add invented notice JSON fields or
   send a second message for the same completion.
+  After a successful `notice-result` response for the exact attempt, retain that
+  response/version as the write receipt; do not automatically run `notice-plan`
+  merely to confirm it again. Failed, ambiguous or conflicting results still
+  require read-only reconciliation; actual retry decisions retain all existing gates.
 - **Non-submit stage or blocker:** send one concise evidence-bearing message explicitly
   labelled “阶段完成，尚未正式提交” or “可操作阻塞，尚未正式提交”, with team/task/stage, completed scope, evidence
   paths, actual checks, remaining risks and the requested Manager check. Save the
@@ -54,8 +79,15 @@ not stage checkpoints. Preserve model/effort settings when sending.
   have Manager impersonate Worker.
 
 Normal completion reporting is part of authorized managed work, not permission to
-override user prohibitions or host policy. Wait at required Manager approval gates;
-do not self-approve or start unauthorized work. Already-authorized ungated steps
+override user prohibitions or host policy. A Manager approval gate constrains business
+progress; it does not require the Worker to keep its current turn running.
+When formal submission and the exact attempt's delivered result are recorded, and
+no authorized work or explicit active-wait request remains, end the turn as
+“submitted, awaiting Manager review” without polling Manager. Keep the task pending
+and the Worker reserved; ending a turn is not approval, release or role exit.
+An explicit request to actively wait in this turn follows its existing scope;
+failed or unknown delivery follows the recovery rules below, not this success path.
+Do not self-approve or start unauthorized work. Already-authorized ungated steps
 may continue within their existing scope.
 
 ## Keep preparation and delivery facts separate
