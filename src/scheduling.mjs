@@ -1,5 +1,6 @@
 import { validate, validateCaller } from './runtime.mjs';
 import { readState, transact } from './store.mjs';
+import {revocationFor,handoffHold} from './worker-revocation.mjs';
 
 const check=(ok,message)=>{if(!ok)throw new Error(message);};
 const same=(a,b)=>a.hostId===b.hostId&&a.threadId===b.threadId;
@@ -39,6 +40,7 @@ export async function cancelStoppedTask(path,request,expectedVersion) {
 export function planDispatch(state,caller,workerId) {
  managerFor(state,caller);
  const worker=state.members.find(m=>m.id===workerId);
+ check(!revocationFor(state,workerId),'Worker revoked');
  check(worker?.role==='Worker'&&worker.lifecycle==='active'&&worker.binding.status==='bound','Worker unavailable');
  validateCaller({hostId:worker.binding.hostId,threadId:worker.binding.threadId});
  const tasks=state.tasks.filter(t=>t.workerId===workerId&&!['approved','cancelled'].includes(t.status));
@@ -47,7 +49,8 @@ export function planDispatch(state,caller,workerId) {
   check(historical?.role==='Worker'&&historical.lifecycle==='active'&&historical.binding.status==='bound'&&same(historical.binding,worker.binding),'Worker identity differs from historical binding');
  }
  const reserved=tasks.filter(t=>t.status!=='queued'),queued=tasks.filter(t=>t.status==='queued');
+ const held=queued.length>0&&!!handoffHold(state,queued[0].id);
  return {sourceVersion:state.version,sourceUpdatedAt:state.updatedAt,identityAssurance:'caller-declared',readOnly:true,executed:false,
-  workerId,decision:reserved.length?'held':queued.length?'ready':'no-work',reservedTaskIds:reserved.map(t=>t.id),queuedTaskIds:queued.map(t=>t.id),
-  nextTaskId:reserved.length?null:queued[0]?.id??null,requiresNativeIdleCheck:true,hostRequest:null};
+  workerId,decision:reserved.length||held?'held':queued.length?'ready':'no-work',reservedTaskIds:reserved.map(t=>t.id),queuedTaskIds:queued.map(t=>t.id),
+  nextTaskId:reserved.length||held?null:queued[0]?.id??null,requiresNativeIdleCheck:true,hostRequest:null,...(held?{reason:'handoff-execution-risk-unresolved'}:{})};
 }

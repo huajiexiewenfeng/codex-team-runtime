@@ -32,6 +32,11 @@ export async function run(args,output=console.log) {
    const s=await ({'queue-task':queueTask,'start-task':startTask,'cancel-queued':cancelQueuedTask,'cancel-stopped':cancelStoppedTask}[command])(a[0],await json(a[1]),Number(a[2]));
    output(`Recorded ${command} at version ${s.version}; no host message sent`);break;
   }
+  case 'revoke-worker': case 'resolve-revocation': {
+   if(a.length!==3||!/^\d+$/.test(a[2])||!Number.isSafeInteger(Number(a[2])))throw new Error(`${command} <state.json> <request.json> <expectedVersion>`);
+   const {writeRevocation}=await import('./revocation-command.mjs');
+   output(JSON.stringify(await writeRevocation(a[0],await json(a[1]),Number(a[2]),command==='revoke-worker'?'revokeWorker':'resolveRevocation')));break;
+  }
   case 'dispatch-plan': {
    if(a.length!==3)throw new Error('dispatch-plan <state.json> <caller.json> <workerId>');
    const {planDispatch}=await import('./scheduling.mjs');output(JSON.stringify(planDispatch(await readState(a[0]),await json(a[1]),a[2]),null,2));break;

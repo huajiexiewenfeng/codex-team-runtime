@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { validate } from './runtime.mjs';
+import {revocationFor} from './worker-revocation.mjs';
 import { applyRegistryProjection, prepareRegistryState } from './registry-projection.mjs';
 
 const fail = message => { throw new Error(message); };
@@ -22,7 +23,9 @@ export function adaptRegistryRequest(request) {
    exact(request, ['action','state','memberId']);
    validate(request.state);
    check(typeof request.memberId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(request.memberId), 'Invalid member ID');
-   check(!request.state.rounds.some(round => round.status === 'open' && round.members.some(member => member.id === request.memberId)), 'Member participates in an open round');
+   const revoked=revocationFor(request.state,request.memberId);
+   check(revoked||!request.state.rounds.some(round => round.status === 'open' && round.members.some(member => member.id === request.memberId)), 'Member participates in an open round');
+   if(revoked)check(!request.state.tasks.some(t=>t.workerId===request.memberId&&!['approved','cancelled'].includes(t.status)),'Revoked member has unfinished tasks');
    return { allowed:true };
   }
   default: fail('Unknown adapter action');

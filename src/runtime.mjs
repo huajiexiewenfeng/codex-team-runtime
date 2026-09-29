@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { deliveryState, deliveryEventTypes } from './delivery-state.mjs';
+import {revocationFor,handoffHold,checkRevocation,checkResolution} from './worker-revocation.mjs';
+const revocationFields=['caller','revocation'];
+const resolutionFields=['caller','revocationId','disposition','evidenceRef'];
 
 const roles = ['Manager', 'Liaison', 'Worker'];
 const statuses = ['queued', 'executing', 'submitted', 'reviewing', 'rework', 'approved', 'blocked', 'cancelled'];
@@ -106,18 +109,25 @@ export function validate(s) {
   if(t.status==='approved') { object(t.acceptance,['actor','at','summary','evidence']); check(r.members.some(m=>m.id===t.acceptance.actor&&m.role==='Manager'),'Approval requires Manager'); time(t.acceptance.at); text(t.acceptance.summary); check(t.acceptance.at===t.completedAt && Array.isArray(t.acceptance.evidence)&&t.acceptance.evidence.length>0,'Missing acceptance'); t.acceptance.evidence.forEach(text); } else check(t.acceptance===null,'Premature acceptance');
   check(r.status!=='closed'||['approved','cancelled'].includes(t.status),'Closed round contains unfinished work');
  }
- for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
+ for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
  let previousEventAt=null;
  for(const e of s.events) { check(Object.hasOwn(fields,e.type),'Unknown audit event'); recordedTime(e.at); check(previousEventAt===null||e.at>=previousEventAt,'Events out of order'); previousEventAt=e.at; check(s.members.some(m=>m.id===e.actor),'Unknown event actor'); if(e.roundId!==undefined) check(roundIds.has(e.roundId),'Unknown event round'); if(e.taskId!==undefined) check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId),'Unknown event task'); }
  check(s.events.length===s.version,'Version/event mismatch'); check(previousEventAt===null||previousEventAt===s.updatedAt,'Last event/update mismatch');
  for(const task of s.tasks)deliveryState(s,task);
  for(const t of s.tasks.filter(t=>t.status==='cancelled')) {
+  const forced=revocationFor(s,t.workerId);
+  if(forced?.revocation.taskIds.includes(t.id)){check(t.completedAt===forced.at&&t.stages.at(-2)&&['executing','queued'].includes(t.stages.at(-2).status),'Revocation cancellation mismatch');continue;}
   const cancellations=s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId),r=s.rounds.find(r=>r.id===t.roundId);
   if(cancellations[0]?.type==='cancelStopped')stoppedCancellation(s,t,cancellations[0]);
   else check(t.stages.length===2&&t.stages[0].status==='queued'&&t.assignedAt===null&&t.submissions===0,'Only unstarted queued tasks can be cancelled');
   check(cancellations.length===1&&cancellations[0].at===t.completedAt&&r.members.some(m=>m.id===cancellations[0].actor&&m.role==='Manager'),'Cancellation audit mismatch');text(cancellations[0].summary);
  }
  for(const e of s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)))check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId&&t.status==='cancelled'),'Cancellation event requires cancelled task');
+ const revoked=new Set(),resolved=new Set();
+ for(const e of s.events){
+  if(e.type==='revokeWorker'){checkRevocation(s,e);check(!revoked.has(e.revocation.memberId),'Duplicate Worker revocation');revoked.add(e.revocation.memberId);for(const id of e.revocation.taskIds)check(s.tasks.find(t=>t.id===id)?.status==='cancelled','Revocation task must stay cancelled');}
+  if(e.type==='resolveRevocation'){checkResolution(s,e);check(!resolved.has(e.revocationId),'Duplicate revocation resolution');resolved.add(e.revocationId);}
+ }
  for(const r of s.rounds.filter(r=>r.status==='closed')) check(s.tasks.some(t=>t.roundId===r.id&&t.required),'Closed round lacks required work');
  object(s.reporting,['enabled','desired','actual','intentVersion','offlineReceipt']); check(typeof s.reporting.enabled==='boolean','Invalid reporting preference'); check(['running','stopped'].includes(s.reporting.desired)&&s.reporting.actual==='unknown','Host state cannot be confirmed by offline runtime'); check(Number.isSafeInteger(s.reporting.intentVersion)&&s.reporting.intentVersion>=0&&s.reporting.intentVersion<=s.version,'Invalid report intent');
  check(s.reporting.desired===(s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'),'Inconsistent reporting intent');
@@ -162,12 +172,17 @@ fields.enqueue=[...fields.assign];
 fields.startTask=['roundId','taskId','caller'];
 fields.cancelQueued=['roundId','taskId','caller','summary'];
 fields.cancelStopped=['roundId','taskId','caller','summary','cancellation'];
+fields.revokeWorker=[...revocationFields,'summary'];
+fields.resolveRevocation=[...resolutionFields,'summary'];
 fields.deliveryCheck=['roundId','taskId','caller','attemptId','outcome','summary'];
 fields.deliveryClaim=['roundId','taskId','caller','attemptId','summary'];
-export function evolve(state,e,expectedVersion) {
+export function evolve(state,e,expectedVersion,{nowMs=Date.now()}={}) {
  validate(state); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]]); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
  if(state.schemaVersion===2){check(state.registry.phase==='active','Registry link is prepared; writes are fenced');check(!['bindMember','exitMember','attachInvite','attachConfirm','detachLiaison','registerWorker'].includes(e.type),'Legacy identity event forbidden in linked state');}
+ check(Number.isFinite(nowMs),'Invalid host clock');check(Date.parse(e.at)<=nowMs+60000,'Event time exceeds host clock (maximum skew 60 seconds)');
  const s=structuredClone(state), actor=s.members.find(m=>m.id===e.actor); check(actor?.lifecycle==='active'&&(actor.binding.status==='bound'||(e.type==='attachConfirm'&&actor.role==='Liaison'&&actor.binding.status==='unbound')),'Actor unavailable');
+ check(!revocationFor(s,actor.id),'Worker revoked');
+ if(['assign','enqueue','startTask','deliveryClaim'].includes(e.type)){check(!revocationFor(s,e.workerId??s.tasks.find(t=>t.id===e.taskId)?.workerId),'Worker revoked');if(e.type!=='enqueue')check(!handoffHold(s,e.taskId),'Handoff execution risk unresolved');}
  if(s.schemaVersion===2){const ready=new Set(s.registry.readyMemberIds),leader=s.members.find(m=>m.role==='Manager');check(ready.has(actor.id),'Actor is not Registry ready');check(leader&&ready.has(leader.id),'Manager leader is not Registry ready');}
  const manager=actor.role==='Manager'; check(manager||['submit','observe','attachConfirm'].includes(e.type),'Manager action required');
  const r=e.roundId?s.rounds.find(r=>r.id===e.roundId):null;
@@ -183,6 +198,17 @@ export function evolve(state,e,expectedVersion) {
  const workerAvailable=workerId=>check(!s.tasks.some(x=>x.workerId===workerId&&!['queued','approved','cancelled'].includes(x.status)),'Worker busy with unapproved work');
  let detachedInvitation;
  switch(e.type) {
+  case 'revokeWorker': {
+   check(s.schemaVersion===2&&s.registry.phase==='active','Active Registry-linked team required');
+   checkRevocation(s,e);const c=e.revocation,w=s.members.find(m=>m.id===c.memberId);
+   check(w.lifecycle==='active'&&!revocationFor(s,w.id),'Worker unavailable or revoked');
+   const pending=s.tasks.filter(t=>t.workerId===w.id&&!['approved','cancelled'].includes(t.status));
+   check(isDeepStrictEqual(pending.map(t=>t.id).sort(),[...c.taskIds].sort()),'All current Worker tasks must be explicitly scoped');
+   for(const id of c.handoffTaskIds)check(s.tasks.find(t=>t.id===id).status==='queued','Handoff task must remain queued');
+   for(const t of pending){check(['queued','executing'].includes(t.status),'Only initial unsubmitted work can be revoked');t.stages.at(-1).endedAt=e.at;t.stages.push({status:'cancelled',startedAt:e.at,endedAt:null});t.status='cancelled';t.completedAt=e.at;}
+   break;
+  }
+  case 'resolveRevocation': checkResolution(s,e);check(!s.events.some(r=>r.type==='resolveRevocation'&&r.revocationId===e.revocationId),'Revocation already resolved');break;
   case 'admitRegistryMember': {
    check(s.schemaVersion===2&&s.registry.phase==='active','Active linked state required');id(e.memberId);
    check(!r.members.some(m=>m.id===e.memberId),'Member already participates in round');
@@ -269,7 +295,7 @@ export function evolve(state,e,expectedVersion) {
  }
  s.version++; s.updatedAt=e.at;
  if(['openRound','closeRound','reports'].includes(e.type)) { s.reporting.desired=s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'; s.reporting.intentVersion=s.version; s.reporting.offlineReceipt=null; }
- const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=structuredClone(e[k]); if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
+ const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=structuredClone(e[k]); if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
  return validate(s);
 }
 function freeze(x) { if(x&&typeof x==='object') { Object.values(x).forEach(freeze); Object.freeze(x); } return x; }
@@ -280,7 +306,8 @@ export function snapshot(state,asOf,roundId=null,staleAfterMs=15*60000) {
   const end=t.completedAt??asOf, duration=start=>start===null?null:Date.parse(end)-Date.parse(start);
   const known=t.observations.filter(o=>o.observedAt!==null).sort((a,b)=>b.observedAt.localeCompare(a.observedAt)||b.at.localeCompare(a.at));
   const latestObservation=known[0]??null, latestProgress=known.find(o=>o.progress)??null;
-  return {...t,delivery:deliveryState(s,t),elapsedMs:duration(t.assignedAt),phaseElapsedMs:duration(t.stages.at(-1).startedAt),stages:t.stages.map(p=>({...p,durationMs:p.startedAt===null?null:Date.parse(p.endedAt??end)-Date.parse(p.startedAt)})),latestObservation,latestProgress,freshness:latestObservation===null?'unknown':Date.parse(asOf)-Date.parse(latestObservation.observedAt)>staleAfterMs?'stale':'recorded'};
+  const revoked=revocationFor(s,t.workerId),hold=handoffHold(s,t.id);
+  return {...t,...(revoked?.revocation.taskIds.includes(t.id)?{revocation:{operationId:revoked.id,summary:revoked.summary,execution:'unknown'}}:{}),...(hold?{handoffRisk:{operationId:hold.id,status:'unresolved'}}:{}),delivery:deliveryState(s,t),elapsedMs:duration(t.assignedAt),phaseElapsedMs:duration(t.stages.at(-1).startedAt),stages:t.stages.map(p=>({...p,durationMs:p.startedAt===null?null:Date.parse(p.endedAt??end)-Date.parse(p.startedAt)})),latestObservation,latestProgress,freshness:latestObservation===null?'unknown':Date.parse(asOf)-Date.parse(latestObservation.observedAt)>staleAfterMs?'stale':'recorded'};
  });
  const registry=s.schemaVersion===2?{registryId:s.registry.registryId,migrationId:s.registry.migrationId,phase:s.registry.phase,teamRevision:s.registry.teamRevision,readyMemberIds:structuredClone(s.registry.readyMemberIds)}:undefined;
  const payload={schemaVersion:s.schemaVersion,sourceVersion:s.version,sourceUpdatedAt:s.updatedAt,asOf,staleAfterMs,roundId,team:s.team,members:roundId===null?s.members:s.rounds.find(r=>r.id===roundId).members,rounds:s.rounds.filter(r=>roundId===null||r.id===roundId),tasks,events:s.events.filter(e=>roundId===null||e.roundId===roundId),reporting:s.reporting,...(registry?{registry}:{}),sourceKinds:[...new Set([s.team.source.kind,...s.events.map(e=>e.source.kind)])],navigation:{available:false,reason:'独立 HTML 的受支持导航尚未验证；Agent 导航工具不是网页 API'}};

@@ -42,7 +42,8 @@ export function render(v,{roundPages=[],codexLinks=false,live=false,embedded=fal
  const pendingCount=counts.all-counts.approved-counts.cancelled;
  const workSummary=!counts.all?'尚无任务记录':!pendingCount?'任务记录均已收口':stale.length?`${stale.length} 项未收口任务的观察已陈旧`:`未收口 ${pendingCount} 项 · 非实时记录`;
  const owner=t=>v.rounds.find(r=>r.id===t.roundId)?.members.find(m=>m.id===t.workerId)?.name??t.workerId;
- const cancellation=t=>v.events.find(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId)?.summary??'取消原因未知';
+ const cancellation=t=>t.revocation?.summary??v.events.find(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId)?.summary??'取消原因未知';
+ const executionLabel=t=>t.revocation?'已撤权 · 进程状态未知':t.assignedAt===null?'未执行':'已停止';
  const cardSummary=t=>t.status==='approved'?`已验收：${t.acceptance.summary}`:t.status==='cancelled'?`已取消：${cancellation(t)}`:t.latestProgress?.summary??t.latestObservation?.summary??(t.status==='queued'?'等待 Worker 可接单后由 Manager 启动。':'尚无已记录进展；不能据此推断任务没有推进。');
  const deliveryEvidence=t=>{
   const records=v.events.filter(e=>e.taskId===t.id&&e.roundId===t.roundId&&['deliveryClaim','deliveryCheck'].includes(e.type));
@@ -52,7 +53,8 @@ export function render(v,{roundPages=[],codexLinks=false,live=false,embedded=fal
   <p class="target-note">定位任务 · 此任务保留显示，不受当前筛选限制</p>
   <div class="row"><div><p class="eyebrow">${esc(t.id)} / ${esc(t.roundId)}</p><h3>${esc(t.title)}</h3></div>${pill(t.status)}</div>
   <p class="task-description">${esc(cardSummary(t))}</p>
-  <div class="task-facts"><strong>${esc(owner(t))}</strong>${t.status==='queued'?`<span>尚未开始执行</span><span>排队已等待 ${elapsed(t.phaseElapsedMs)}</span>`:t.status==='cancelled'?`<span>${t.assignedAt===null?'未执行':'已停止'} · 未验收</span><span>${t.assignedAt===null?'排队等待':'任务历时'} ${elapsed(t.assignedAt===null?t.stages[0]?.durationMs:t.elapsedMs)}</span>`:`<span>任务历时 ${elapsed(t.elapsedMs)}</span>${t.status==='approved'?`<span>验收时间 ${time(t.acceptance.at)}</span>`:`<span>当前阶段 ${elapsed(t.phaseElapsedMs)}</span>`}`}</div>
+  ${t.handoffRisk?'<p class="source">交接暂停：旧 Worker 进程状态未知，须核对停止或工作区隔离证据。</p>':''}
+  <div class="task-facts"><strong>${esc(owner(t))}</strong>${t.status==='queued'?`<span>尚未开始执行</span><span>排队已等待 ${elapsed(t.phaseElapsedMs)}</span>`:t.status==='cancelled'?`<span>${executionLabel(t)} · 未验收</span><span>${t.assignedAt===null?'排队等待':'任务历时'} ${elapsed(t.assignedAt===null?t.stages[0]?.durationMs:t.elapsedMs)}</span>`:`<span>任务历时 ${elapsed(t.elapsedMs)}</span>${t.status==='approved'?`<span>验收时间 ${time(t.acceptance.at)}</span>`:`<span>当前阶段 ${elapsed(t.phaseElapsedMs)}</span>`}`}</div>
   <div class="task-foot">${t.completedAt?`<span>${t.status==='approved'?'已完成 · 以验收记录为准':`取消时间 ${time(t.completedAt)}`}</span>`:`<span class="freshness ${t.freshness==='stale'?'stale':''}">${esc({unknown:'观察时间未知',stale:'观察已陈旧',recorded:'已记录，非实时'}[t.freshness])}</span>`}<span>${t.completedAt?'完成计时冻结':'包含等待 · 截至快照时间'}</span></div>
   ${live?`<button type="button" class="timeline-open" data-timeline-task="${esc(t.id)}">查看时间线</button>`:''}
   <details class="task-detail"${liveKey(`details-${taskId(t,index)}`)}><summary>任务详情<span aria-hidden="true"> · 阶段 / 派发 / 证据</span></summary><div class="detail-body">
@@ -60,7 +62,7 @@ export function render(v,{roundPages=[],codexLinks=false,live=false,embedded=fal
    <h4>初始派发：${esc(deliveryLabels[t.delivery.status])}</h4><p>领取记录 ${t.delivery.attempts} 次，不等于实际发送次数。</p><p class="source">尝试 ID ${esc(t.delivery.attemptId)} · 核对事件 ${esc(t.delivery.evidenceEventId)}<br>派发证据与业务执行状态独立；结果未知不等于未发送。</p>
    ${deliveryEvidence(t)}
    <h4>阶段历时（包含等待）</h4><ol class="stages">${t.stages.map(p=>`<li><div class="row"><span>${esc(labels[p.status])}</span><strong>${elapsed(p.durationMs)}</strong></div><span class="source">${time(p.startedAt)} → ${time(p.endedAt??t.completedAt??v.asOf)}</span></li>`).join('')||'<li>尚无执行阶段。</li>'}</ol>
-   <h4>验收证据</h4>${t.acceptance?`<p>${esc(t.acceptance.summary)}</p><p class="source">${esc(t.acceptance.actor)} · ${time(t.acceptance.at)}</p><ul>${t.acceptance.evidence.map(e=>`<li class="mono">${esc(e)}</li>`).join('')}</ul>`:t.status==='cancelled'?`<p>已取消，${t.assignedAt===null?'未执行':'已停止'}、未验收：${esc(v.events.find(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId)?.summary)}</p>`:'<p>尚未验收；Worker final 只是提交。</p>'}
+   <h4>验收证据</h4>${t.acceptance?`<p>${esc(t.acceptance.summary)}</p><p class="source">${esc(t.acceptance.actor)} · ${time(t.acceptance.at)}</p><ul>${t.acceptance.evidence.map(e=>`<li class="mono">${esc(e)}</li>`).join('')}</ul>`:t.status==='cancelled'?`<p>已取消，${executionLabel(t)}、未验收：${esc(cancellation(t))}</p>`:'<p>尚未验收；Worker final 只是提交。</p>'}
    <h4>最近观察</h4><p>${provenance(t.latestObservation)}</p><h4>最近有效进展</h4><p>${provenance(t.latestProgress)}</p>
    <h4>全部观察记录</h4><ul>${t.observations.map(o=>`<li>${provenance(o)}</li>`).join('')||'<li>暂无观察记录。</li>'}</ul>
   </div></details></article>`;

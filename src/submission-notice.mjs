@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { validate, validateCaller } from './runtime.mjs';
 import { readState, transact } from './store.mjs';
+import {revocationFor} from './worker-revocation.mjs';
 
 const check = (ok, message) => { if (!ok) throw new Error(message); };
 const identity = m => ({ hostId: m.binding.hostId, threadId: m.binding.threadId });
@@ -14,6 +15,7 @@ function context(state, taskId) {
   const round = state.rounds.find(r => r.id === task.roundId);
   const manager = state.members.find(m => m.role === 'Manager');
   const worker = state.members.find(m => m.id === task.workerId);
+  check(!revocationFor(state,task.workerId),'Worker revoked; late notice cannot advance review');
   for (const member of [manager, worker]) {
     const historical = round.members.find(m => m.id === member?.id);
     check(member?.lifecycle === 'active' && member.binding.status === 'bound', 'Active bound member required');

@@ -65,6 +65,8 @@ For an explicit withdrawal of unstarted work, use [queued cancellation](referenc
 
 For explicitly withdrawn **started but stopped** work, use [stopped-task cancellation](references/operations.md#stopped-task-cancellation). Only initial executing work with verified stop/WIP evidence and resolved delivery is supported; native idle alone cannot release it.
 
+For explicit user revocation of an exact Worker without a stop receipt, use the trusted runtime's `docs/worker-revocation.md`: `revoke-worker` fences selected initial unsubmitted work, then the original Manager performs Registry `exit_member`. Preserve historical round membership. This is not ordinary stopped cancellation or an OS stop; selected replacement tasks remain held until `resolve-revocation` records verified stop or resource-isolation evidence. Do not require the removed Worker's acknowledgement on this authorized path, infer authority from idle, or apply it to submitted/reviewing work. Upgrade persistent readers before writing new events.
+
 Before an initial native assignment send or recovery of a failed/uncertain send, read [delivery recovery](references/delivery-recovery.md). Reserve one attempt locally before sending; only checked non-delivery permits a new claim for the same task. Unknown delivery retains the reservation and requires reconciliation, not resend, cancellation or another assignment.
 
 Normal team communication within an unchanged valid assignment/report grant needs no extra Skill approval or evidence-formatting step. Use [compact communication evidence](references/communication-evidence.md) only to diagnose missing/conflicting evidence or an approval failure; it cannot grant permission or unlock a denied request.
