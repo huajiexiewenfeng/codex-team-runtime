@@ -11,6 +11,7 @@ const roles = ['Manager', 'Liaison', 'Worker', 'Unknown'];
 const sourceKindValues = ['fixture', 'manual', 'host-observation', 'codex-log'];
 const directTeamContextTools = new Set([
   'team_context.read', 'team_context.manage', 'team_context.startup',
+  'team_context.dispatch','team_context.dispatch_status','mcp__team_context__team_context_dispatch','mcp__team_context__team_context_dispatch_status',
   'team_context.notice', 'team_context.notice_status', 'mcp__team_context__team_context_notice', 'mcp__team_context__team_context_notice_status',
   'mcp__team_context__team_context_read', 'mcp__team_context__team_context_manage', 'mcp__team_context__team_context_startup'
 ]);

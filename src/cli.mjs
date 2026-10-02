@@ -41,6 +41,21 @@ export async function run(args,output=console.log) {
    if(a.length!==3)throw new Error('dispatch-plan <state.json> <caller.json> <workerId>');
    const {planDispatch}=await import('./scheduling.mjs');output(JSON.stringify(planDispatch(await readState(a[0]),await json(a[1]),a[2]),null,2));break;
   }
+  case 'dispatch-freeze': {
+   if(a.length!==2)throw new Error('dispatch-freeze <state.json> <brief.json>');
+   const {freezeDispatchBrief}=await import('./dispatch-runtime.mjs');
+   output(JSON.stringify(await freezeDispatchBrief(a[0],await json(a[1])),null,2));break;
+  }
+  case 'dispatch-export': {
+   if(a.length!==2)throw new Error('dispatch-export <state.json> <new-directory>');
+   const {exportDispatchBundle}=await import('./dispatch-export.mjs');output(JSON.stringify(await exportDispatchBundle(resolve(a[0]),resolve(a[1])),null,2));break;
+  }
+  case 'dispatch-request': {
+   if(a.length!==2)throw new Error('dispatch-request <state.json> <request.json>');
+   const {dispatchRuntime}=await import('./dispatch-runtime.mjs');const state=await readState(a[0]);
+   const response=await dispatchRuntime({statePath:a[0],registryPath:state.registry?.registryPath,request:await json(a[1])});
+   output(JSON.stringify(response,null,2));if(response.status==='error')throw new Error(response.reasonCode);break;
+  }
   case 'delivery-check': case 'delivery-claim': {
    if(a.length!==3||!/^\d+$/.test(a[2])||!Number.isSafeInteger(Number(a[2])))throw new Error(`${command} <state.json> <request.json> <expectedVersion>`);
    const {checkDelivery,claimDelivery}=await import('./delivery.mjs');const s=await (command==='delivery-check'?checkDelivery:claimDelivery)(a[0],await json(a[1]),Number(a[2]));
@@ -198,7 +213,7 @@ export async function run(args,output=console.log) {
   }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }
   case 'demo': { if(a.length!==1) throw new Error('demo <new-output-directory>'); const directory=resolve(a[0]); await mkdir(dirname(directory),{recursive:true}); await mkdir(directory); const s=demoState(); await initialize(join(directory,'state.json'),s); const v=await exportView(s,join(directory,'view'),'2026-09-05T01:00:00.000Z','round-demo'); output(`FIXTURE / 模拟来源: ${join(directory,'view','index.html')}\nSnapshot ${v.snapshotId}`); break; }
-  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, notice-request, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
+  default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, dispatch-freeze, dispatch-request, dispatch-export, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, notice-request, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{

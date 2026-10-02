@@ -25,6 +25,12 @@ test('E03 observation metadata roundtrips without accepting notice bodies', () =
   assert.throws(()=>buildServerMcpReport(input([{event:{...e,notice:{...e.notice,prompt:'private'}},sourceRefs:['fixture']}]),daily()),/notice/);
 });
 
+test('E04 observations retain bounded dispatch metadata without material or host request',()=>{
+ const e=event({tool:'team_context.dispatch',role:'Manager',outcome:'success',dispatch:{action:'cancel',taskId:'t',operationId:'c',sourceVersion:4,requestBytes:300,responseBytes:200}});
+ const report=buildServerMcpReport(input([{event:e,sourceRefs:['fixture']}]),daily());assert.deepEqual(report.events[0].event.dispatch,e.dispatch);
+ assert.throws(()=>buildServerMcpReport(input([{event:{...e,dispatch:{...e.dispatch,hostRequest:{prompt:'private'}}},sourceRefs:['fixture']}]),daily()),/dispatch/);
+});
+
 test('deduplicates identical key-order variants, keeps retries, sorts, filters cutoff and groups every day', () => {
   const first = event(), duplicate = Object.fromEntries(Object.entries(first).reverse());
   const retry = event({ eventId: '00000000-0000-4000-8000-000000000002', role: 'Manager', reason: 'manual', outcome: 'inactive' });

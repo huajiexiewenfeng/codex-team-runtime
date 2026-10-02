@@ -217,7 +217,7 @@ class StartupLedger:
         node, root = self.registry._trusted_runtime()
         path = canonical_absolute(request["state_path"], "state_path")
         _, state = read_state(path)
-        invoke_adapter(node, root, {"action": "inspect", "state": state})
+        invoke_adapter(node, root, {"action": "inspect", "state": state, "statePath": str(path)})
         if state["team"]["id"] != request["team_id"]:
             _fail("SLOT_MISMATCH", "Original state has another team identity")
         if op is not None and (_digest(state["team"]) != op["teamDigest"] or state["version"] < op["sourceVersion"]):

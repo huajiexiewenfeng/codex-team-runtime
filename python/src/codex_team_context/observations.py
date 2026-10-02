@@ -20,7 +20,7 @@ REASONS = (
     "onboarding", "resume", "post_compaction", "before_dispatch", "before_delivery",
     "before_review", "identity_conflict", "manual", "unknown",
 )
-_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status"}
+_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status", "team_context.dispatch", "team_context.dispatch_status"}
 _OUTCOMES = {"matched", "inactive", "unmatched", "success", "error", "unexpected_error"}
 _ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -162,7 +162,7 @@ class ObservationRecorder:
                 for value in details.values():
                     if not ((type(value) is int and value >= 0) or (isinstance(value,str) and len(value)<=256 and all(ord(c)>=32 for c in value))):
                         raise ValueError("Invalid E03 observation value")
-                event["notice"] = details
+                event["dispatch" if tool in {"team_context.dispatch", "team_context.dispatch_status"} else "notice"] = details
             self._publish(event)
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")

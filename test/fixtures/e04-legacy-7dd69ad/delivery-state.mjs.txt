@@ -1,5 +1,4 @@
 // Pure audit projection, shared by validation and planning. No host operations.
-import {isDispatch} from './dispatch-contract.mjs';
 const check=(ok,message)=>{if(!ok)throw new Error(message);};
 export const deliveryEventTypes=['deliveryCheck','deliveryClaim'];
 export function deliveryState(state,task) {
@@ -13,7 +12,7 @@ export function deliveryState(state,task) {
  let started=false,advanced=false,observed=false;
  for(const [index,e] of events.entries()) {
   if(e===initial)started=true;
-  if(['submit','review','rework','approve','block','unblock','cancelQueued','cancelStopped','cancelUndelivered'].includes(e.type))advanced=true;
+  if(['submit','review','rework','approve','block','unblock','cancelQueued','cancelStopped'].includes(e.type))advanced=true;
   if(e.type==='observe')observed=true;
   if(!deliveryEventTypes.includes(e.type))continue;
   // Prefer audit order when timestamps tie; legacy observations without an audit
@@ -22,9 +21,7 @@ export function deliveryState(state,task) {
    const position=events.findIndex(x=>x.type==='observe'&&x.id===o.id&&x.at===o.at);
    return position<0?o.at<=e.at:position<=index;
   });
-  const e04=isDispatch(initial)&&isDispatch(e);
-  check(!isDispatch(initial)||isDispatch(e),'E04 attempts require dispatch result/prepare');
-  check(started&&(!advanced||(e04&&e.type==='deliveryCheck'&&['delivered','unknown'].includes(e.outcome))),'Delivery event outside initial executing work');
+  check(started&&!advanced,'Delivery event outside initial executing work');
   check(round.members.some(m=>m.id===e.actor&&m.role==='Manager'&&m.lifecycle==='active'),'Delivery audit requires Manager');
   check(e.attemptId===result.attemptId,'Delivery attempt mismatch');
   check(typeof e.summary==='string'&&e.summary.trim().length>0&&e.summary.length<=4000,'Delivery evidence summary required');
@@ -35,8 +32,8 @@ export function deliveryState(state,task) {
    result.attemptId=e.id;result.status='unknown';result.attempts++;
   } else {
    check(result.status==='unknown','Delivery attempt already resolved');
-   check(['unknown','not-delivered','delivered',...(e04?['policy-denied']:[])].includes(e.outcome),'Invalid delivery outcome');
-   check(!['not-delivered','policy-denied'].includes(e.outcome)||!priorObservation,'Observed work contradicts non-delivery');
+   check(['unknown','not-delivered','delivered'].includes(e.outcome),'Invalid delivery outcome');
+   check(e.outcome!=='not-delivered'||!priorObservation,'Observed work contradicts non-delivery');
    result.status=e.outcome;
   }
   result.evidenceEventId=e.id;

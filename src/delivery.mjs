@@ -1,3 +1,4 @@
+import {dispatchHold,isDispatch} from './dispatch-contract.mjs';
 import {validate,validateCaller} from './runtime.mjs';
 import {readState,transact} from './store.mjs';
 import {deliveryState} from './delivery-state.mjs';
@@ -23,5 +24,7 @@ export function planDelivery(state,caller,taskId){
   decision=task.status!=='executing'||task.observations.length||task.stages.some(p=>!['queued','executing'].includes(p.status))?'supervise':!delivery.attemptId?'unavailable':delivery.status==='delivered'?'supervise':delivery.status==='not-delivered'?'ready-to-claim':'reconcile';
   if(decision==='ready-to-claim'&&state.tasks.some(t=>t.id!==task.id&&t.workerId===task.workerId&&!['queued','approved','cancelled'].includes(t.status)))decision='held';
  }
+ if(dispatchHold(state,task.workerId))decision='held';
+ if(state.events.some(e=>e.taskId===task.id&&e.type==='startTask'&&isDispatch(e))&&decision==='ready-to-claim')decision='dispatch-prepare';
  return {sourceVersion:state.version,sourceUpdatedAt:state.updatedAt,taskId,workerId:task.workerId,identityAssurance:'caller-declared',delivery,decision,readOnly:true,executed:false,hostRequest:null,requiresNativeEvidence:true};
 }

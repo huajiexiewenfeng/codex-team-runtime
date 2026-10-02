@@ -64,12 +64,18 @@ def validate_request(request: Any) -> bytes:
     return payload
 
 class NoticeService:
+    validator = staticmethod(validate_request)
+    adapter_name = "notice-adapter.mjs"
+
+    def allowed_roles(self, action):
+        return {"Worker"} if action == "prepare" else {"Worker", "Manager"}
+
     def __init__(self, registry: TeamRegistry, runtime_revision: str | None = None):
         self.registry = registry
         self.runtime_revision = runtime_revision or "unversioned"
 
     def handle(self, request: dict) -> dict:
-        validate_request(request)
+        self.validator(request)
         # No Registry lock spans the subprocess. Node revalidates under its guard.
         value = self.registry._validated(self.registry._store.read())
         located = self.registry._member_by_identity(value, request["actor_host_id"], request["actor_thread_id"])
@@ -78,7 +84,7 @@ class NoticeService:
         team, member = located
         if team["id"] != request["team_id"] or member["lifecycle"] != "active":
             _fail("IDENTITY_CONFLICT", "Caller/team membership mismatch")
-        if member["role"] not in ({"Worker"} if request["action"] == "prepare" else {"Worker", "Manager"}):
+        if member["role"] not in self.allowed_roles(request["action"]):
             _fail("IDENTITY_CONFLICT", "Caller role cannot perform this action")
         leader = self.registry._member(team, team["leaderMemberId"])
         if self.registry._effective_onboarding_status(value, team, member, leader) != "ready":
@@ -88,9 +94,9 @@ class NoticeService:
             _fail("TEAM_NOT_CONNECTED", "Team has no linked runtime")
         node, root = self.registry._trusted_runtime()
         state = canonical_absolute(runtime["statePath"], "statePath")
-        adapter = root / "src" / "notice-adapter.mjs"
+        adapter = root / "src" / self.adapter_name
         if not adapter.is_file():
-            _fail("RUNTIME_UNAVAILABLE", "E03 adapter is not installed in the configured runtime")
+            _fail("RUNTIME_UNAVAILABLE", "Requested adapter is not installed in the configured runtime")
         token = uuid.uuid4().hex
         envelope = {"statePath": str(state), "registryPath": str(self.registry.registry_path), "request": request,
                     "runtimeRevision": self.runtime_revision, "executionToken": token}

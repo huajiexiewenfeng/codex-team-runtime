@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import {isDispatch,dispatchHold} from './dispatch-contract.mjs';
 import { deliveryState, deliveryEventTypes } from './delivery-state.mjs';
 import {revocationFor,handoffHold,checkRevocation,checkResolution} from './worker-revocation.mjs';
 const revocationFields=['caller','revocation'];
@@ -64,17 +63,6 @@ function stoppedCancellation(s,t,e) {
  const delivery=deliveryState(s,t);id(c.deliveryAttemptId);check(delivery.status==='delivered'&&delivery.attemptId===c.deliveryAttemptId,'Resolved delivered assignment required; unknown delivery cannot be cancelled');
  object(c.wip,['disposition','ref','summary']);check(['none','retained','handed-off'].includes(c.wip.disposition),'Invalid WIP disposition');text(c.wip.ref);text(c.wip.summary);
 }
-function undeliveredCancellation(s,t,e) {
- const index=s.events.findIndex(x=>x.id===e.id),prior=index<0?s.events:s.events.slice(0,index);
- const stages=t.status==='cancelled'?t.stages.slice(0,-1):t.stages;
- check(isDispatch(e)&&stages.at(-1)?.status==='executing'&&stages.every(p=>['queued','executing'].includes(p.status))&&t.submissions===0&&t.observations.length===0,'Only unobserved initial E04 work can be withdrawn');
- const fields=['authorization_ref','reason','nonreceipt_evidence_ref','execution_evidence_ref'];object(e.cancellation,fields);for(const key of fields)text(e.cancellation[key]);
- validateCaller(e.caller);const actor=s.members.find(m=>m.id===e.actor);check(actor?.role==='Manager'&&actor.binding.hostId===e.caller.hostId&&actor.binding.threadId===e.caller.threadId,'Cancellation Manager mismatch');
- const projection={...s,events:prior},delivery=deliveryState(projection,{...t,status:'executing'});
- check(['not-delivered','policy-denied'].includes(delivery.status)&&delivery.attemptId===e.attemptId,'All attempts must be resolved undelivered');
- check(!prior.some(x=>x.taskId===t.id&&x.type==='deliveryCheck'&&x.outcome==='delivered'),'Accepted work cannot be withdrawn as undelivered');
- check(!revocationFor(projection,t.workerId)&&!handoffHold(projection,t.id)&&!dispatchHold(projection,t.workerId),'Unresolved Worker risk');
-}
 export function validate(s) {
  object(s,['schemaVersion','version','updatedAt','team','members','rounds','tasks','events','reporting','session','registry']); check([1,2].includes(s.schemaVersion),'Unsupported schema version'); check(Number.isSafeInteger(s.version)&&s.version>=0,'Invalid version'); time(s.updatedAt);
  object(s.team,['id','name','source']); id(s.team.id); text(s.team.name); provenance(s.team.source); members(s.members);
@@ -121,23 +109,20 @@ export function validate(s) {
   if(t.status==='approved') { object(t.acceptance,['actor','at','summary','evidence']); check(r.members.some(m=>m.id===t.acceptance.actor&&m.role==='Manager'),'Approval requires Manager'); time(t.acceptance.at); text(t.acceptance.summary); check(t.acceptance.at===t.completedAt && Array.isArray(t.acceptance.evidence)&&t.acceptance.evidence.length>0,'Missing acceptance'); t.acceptance.evidence.forEach(text); } else check(t.acceptance===null,'Premature acceptance');
   check(r.status!=='closed'||['approved','cancelled'].includes(t.status),'Closed round contains unfinished work');
  }
- for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(['cancelStopped','cancelUndelivered'].includes(e.type)?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...([...deliveryEventTypes,'dispatchConflict','cancelUndelivered'].includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if([...deliveryEventTypes,'dispatchConflict','cancelUndelivered'].includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
+ for(const e of s.events) { object(e,['id','type','actor','at','source','roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(e.type==='detachLiaison'?['detachedInvitation']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId']:[]),...(e.type==='deliveryCheck'?['outcome']:[])]); id(e.id); check(!eventIds.has(e.id),'Duplicate event'); eventIds.add(e.id); text(e.type); id(e.actor); time(e.at); provenance(e.source); if(e.type==='admitRegistryMember')id(e.memberId);if(e.summary!==undefined) text(e.summary); if(deliveryEventTypes.includes(e.type)){id(e.taskId);id(e.roundId);id(e.attemptId);} }
  let previousEventAt=null;
  for(const e of s.events) { check(Object.hasOwn(fields,e.type),'Unknown audit event'); recordedTime(e.at); check(previousEventAt===null||e.at>=previousEventAt,'Events out of order'); previousEventAt=e.at; check(s.members.some(m=>m.id===e.actor),'Unknown event actor'); if(e.roundId!==undefined) check(roundIds.has(e.roundId),'Unknown event round'); if(e.taskId!==undefined) check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId),'Unknown event task'); }
  check(s.events.length===s.version,'Version/event mismatch'); check(previousEventAt===null||previousEventAt===s.updatedAt,'Last event/update mismatch');
- for(const e of s.events)check(!e.source.ref.startsWith('e04-op:')||isDispatch(e),'Malformed E04 operation reference');
  for(const task of s.tasks)deliveryState(s,task);
- for(const e of s.events.filter(x=>x.type==='dispatchConflict'))check(isDispatch(e)&&s.events.some(x=>x.id===e.attemptId&&isDispatch(x)&&x.taskId===e.taskId&&['startTask','deliveryClaim'].includes(x.type)),'Invalid dispatch conflict audit');
  for(const t of s.tasks.filter(t=>t.status==='cancelled')) {
   const forced=revocationFor(s,t.workerId);
   if(forced?.revocation.taskIds.includes(t.id)){check(t.completedAt===forced.at&&t.stages.at(-2)&&['executing','queued'].includes(t.stages.at(-2).status),'Revocation cancellation mismatch');continue;}
-  const cancellations=s.events.filter(e=>['cancelQueued','cancelStopped','cancelUndelivered'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId),r=s.rounds.find(r=>r.id===t.roundId);
-  if(cancellations[0]?.type==='cancelUndelivered')undeliveredCancellation(s,t,cancellations[0]);
-  else if(cancellations[0]?.type==='cancelStopped')stoppedCancellation(s,t,cancellations[0]);
+  const cancellations=s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)&&e.taskId===t.id&&e.roundId===t.roundId),r=s.rounds.find(r=>r.id===t.roundId);
+  if(cancellations[0]?.type==='cancelStopped')stoppedCancellation(s,t,cancellations[0]);
   else check(t.stages.length===2&&t.stages[0].status==='queued'&&t.assignedAt===null&&t.submissions===0,'Only unstarted queued tasks can be cancelled');
   check(cancellations.length===1&&cancellations[0].at===t.completedAt&&r.members.some(m=>m.id===cancellations[0].actor&&m.role==='Manager'),'Cancellation audit mismatch');text(cancellations[0].summary);
  }
- for(const e of s.events.filter(e=>['cancelQueued','cancelStopped','cancelUndelivered'].includes(e.type)))check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId&&t.status==='cancelled'),'Cancellation event requires cancelled task');
+ for(const e of s.events.filter(e=>['cancelQueued','cancelStopped'].includes(e.type)))check(s.tasks.some(t=>t.id===e.taskId&&t.roundId===e.roundId&&t.status==='cancelled'),'Cancellation event requires cancelled task');
  const revoked=new Set(),resolved=new Set();
  for(const e of s.events){
   if(e.type==='revokeWorker'){checkRevocation(s,e);check(!revoked.has(e.revocation.memberId),'Duplicate Worker revocation');revoked.add(e.revocation.memberId);for(const id of e.revocation.taskIds)check(s.tasks.find(t=>t.id===id)?.status==='cancelled','Revocation task must stay cancelled');}
@@ -191,26 +176,21 @@ fields.revokeWorker=[...revocationFields,'summary'];
 fields.resolveRevocation=[...resolutionFields,'summary'];
 fields.deliveryCheck=['roundId','taskId','caller','attemptId','outcome','summary'];
 fields.deliveryClaim=['roundId','taskId','caller','attemptId','summary'];
-fields.cancelUndelivered=['roundId','taskId','caller','attemptId','summary','cancellation'];
-fields.dispatchConflict=['roundId','taskId','caller','attemptId','summary'];
-export function evolve(state,e,expectedVersion,{nowMs=Date.now(),dispatchOperation=false}={}) {
- validate(state); check(!e.source?.ref?.startsWith('e04-op:')||dispatchOperation,'E04 events require dispatch runtime'); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]]); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
+export function evolve(state,e,expectedVersion,{nowMs=Date.now()}={}) {
+ validate(state); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]]); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
  if(state.schemaVersion===2){check(state.registry.phase==='active','Registry link is prepared; writes are fenced');check(!['bindMember','exitMember','attachInvite','attachConfirm','detachLiaison','registerWorker'].includes(e.type),'Legacy identity event forbidden in linked state');}
  check(Number.isFinite(nowMs),'Invalid host clock');check(Date.parse(e.at)<=nowMs+60000,'Event time exceeds host clock (maximum skew 60 seconds)');
  const s=structuredClone(state), actor=s.members.find(m=>m.id===e.actor); check(actor?.lifecycle==='active'&&(actor.binding.status==='bound'||(e.type==='attachConfirm'&&actor.role==='Liaison'&&actor.binding.status==='unbound')),'Actor unavailable');
  check(!revocationFor(s,actor.id),'Worker revoked');
  if(['assign','enqueue','startTask','deliveryClaim'].includes(e.type)){check(!revocationFor(s,e.workerId??s.tasks.find(t=>t.id===e.taskId)?.workerId),'Worker revoked');if(e.type!=='enqueue')check(!handoffHold(s,e.taskId),'Handoff execution risk unresolved');}
  if(s.schemaVersion===2){const ready=new Set(s.registry.readyMemberIds),leader=s.members.find(m=>m.role==='Manager');check(ready.has(actor.id),'Actor is not Registry ready');check(leader&&ready.has(leader.id),'Manager leader is not Registry ready');}
- if(['assign','startTask','deliveryClaim'].includes(e.type))check(!dispatchHold(s,e.workerId??s.tasks.find(t=>t.id===e.taskId)?.workerId),'Dispatch conflict hold requires reconciliation');
  const manager=actor.role==='Manager'; check(manager||['submit','observe','attachConfirm'].includes(e.type),'Manager action required');
  const r=e.roundId?s.rounds.find(r=>r.id===e.roundId):null;
  const t=e.taskId?s.tasks.find(t=>t.id===e.taskId&&t.roundId===e.roundId):null;
- const initial=t?s.events.find(x=>x.taskId===t.id&&['assign','startTask'].includes(x.type)):null;
- const lateDispatch=isDispatch(initial)&&isDispatch(e)&&(e.type==='dispatchConflict'||(e.type==='deliveryCheck'&&['delivered','unknown'].includes(e.outcome)));
- if(e.type!=='openRound'&&e.roundId) check(r&&(r.status==='open'||lateDispatch),'Round unavailable or closed');
+ if(e.type!=='openRound'&&e.roundId) check(r?.status==='open','Round unavailable or closed');
  if(e.taskId&&!['assign','enqueue'].includes(e.type)) { check(t,'Task missing'); check(manager||(actor.role==='Worker'&&actor.id===t.workerId),'Worker ownership mismatch'); }
- if(['enqueue','startTask','cancelQueued','cancelStopped','cancelUndelivered','dispatchConflict','admitRegistryMember',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
- check(t?.status!=='cancelled'||lateDispatch,'Cancelled task immutable');
+ if(['enqueue','startTask','cancelQueued','cancelStopped','admitRegistryMember',...deliveryEventTypes].includes(e.type)||(e.type==='assign'&&Object.hasOwn(e,'caller'))) {validateCaller(e.caller);check(e.caller.hostId===actor.binding.hostId&&e.caller.threadId===actor.binding.threadId,'Manager caller mismatch');}
+ check(t?.status!=='cancelled','Cancelled task immutable');
  if(t?.status==='queued')check(['startTask','cancelQueued'].includes(e.type),'Queued task must start before work');
  if(e.type==='submit') check(actor.role==='Worker'&&actor.id===t.workerId,'Only assigned Worker can submit');
  const transition=status=>{ check(t.status!=='approved','Completed task immutable'); const last=t.stages.at(-1); last.endedAt=e.at; t.stages.push({status,startedAt:e.at,endedAt:null}); t.status=status; };
@@ -289,19 +269,16 @@ export function evolve(state,e,expectedVersion,{nowMs=Date.now(),dispatchOperati
    const status=queued?'queued':'executing';s.tasks.push({id:e.taskId,roundId:r.id,title:e.title,workerId:w.id,required:e.required,assignedAt:e.assignedAt,status,completedAt:null,stages:[{status,startedAt:queued?e.at:e.assignedAt,endedAt:null}],submissions:0,observations:[],acceptance:null});break;
   }
   case 'startTask': {
-   check(dispatchOperation||!s.events.some(x=>x.type==='enqueue'&&x.taskId===t.id&&x.source.ref.startsWith('e04-brief:')),'Frozen E04 queue requires dispatch prepare');
    check(t.status==='queued','Only queued tasks can start');const w=assignedWorker(t.workerId);workerAvailable(w.id);
    check(s.tasks.find(x=>x.workerId===w.id&&x.status==='queued')?.id===t.id,'Only FIFO queue head may start');
    transition('executing');t.assignedAt=e.at;break;
   }
   case 'deliveryCheck': case 'deliveryClaim': {
-   check(t?.status==='executing'||lateDispatch,'Delivery recovery requires initial executing work');if(!lateDispatch)assignedWorker(t.workerId);id(e.attemptId);text(e.summary);
-   if(e.type==='deliveryClaim'||['not-delivered','policy-denied'].includes(e.outcome))check(t.observations.length===0,'Observed work forbids non-delivery retry');
+   check(t?.status==='executing','Delivery recovery requires initial executing work');assignedWorker(t.workerId);id(e.attemptId);text(e.summary);
+   if(e.type==='deliveryClaim'||e.outcome==='not-delivered')check(t.observations.length===0,'Observed work forbids non-delivery retry');
    if(e.type==='deliveryClaim')check(!s.tasks.some(x=>x.id!==t.id&&x.workerId===t.workerId&&!['queued','approved','cancelled'].includes(x.status)),'Competing Worker reservation blocks retry');
    break; // Audit projection validates attempt lineage and outcome after append.
   }
-  case 'dispatchConflict': check(isDispatch(initial)&&isDispatch(e),'E04 conflict requires original dispatch');id(e.attemptId);text(e.summary);check(s.events.some(x=>x.id===e.attemptId&&x.taskId===t.id&&isDispatch(x)&&['startTask','deliveryClaim'].includes(x.type)),'Unknown conflict attempt');break;
-  case 'cancelUndelivered': check(isDispatch(initial)&&isDispatch(e),'E04 cancellation requires dispatch');assignedWorker(t.workerId);undeliveredCancellation(s,t,e);transition('cancelled');t.completedAt=e.at;break;
   case 'cancelQueued': check(t.status==='queued','Only queued tasks can be cancelled');text(e.summary);transition('cancelled');t.completedAt=e.at;break;
   case 'cancelStopped': check(t.status==='executing','Only initial executing work can be withdrawn');assignedWorker(t.workerId);stoppedCancellation(s,t,e);transition('cancelled');t.completedAt=e.at;break;
   case 'submit': text(e.summary); check(['executing','rework'].includes(t.status),'Submission not allowed'); transition('submitted'); t.submissions++; break;
@@ -318,7 +295,7 @@ export function evolve(state,e,expectedVersion,{nowMs=Date.now(),dispatchOperati
  }
  s.version++; s.updatedAt=e.at;
  if(['openRound','closeRound','reports'].includes(e.type)) { s.reporting.desired=s.reporting.enabled&&s.rounds.some(r=>r.status==='open')?'running':'stopped'; s.reporting.intentVersion=s.version; s.reporting.offlineReceipt=null; }
- const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(['cancelStopped','cancelUndelivered'].includes(e.type)?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...([...deliveryEventTypes,'dispatchConflict','cancelUndelivered'].includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=structuredClone(e[k]); if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
+ const audit={id:e.id,type:e.type,actor:e.actor,at:e.at,source:structuredClone(e.source)}; for(const k of ['roundId','taskId','summary',...(e.type==='revokeWorker'?revocationFields:[]),...(e.type==='resolveRevocation'?resolutionFields:[]),...(e.type==='cancelStopped'?['caller','cancellation']:[]),...(e.type==='admitRegistryMember'?['memberId']:[]),...(deliveryEventTypes.includes(e.type)?['attemptId','outcome']:[])]) if(e[k]!==undefined) audit[k]=structuredClone(e[k]); if(detachedInvitation) audit.detachedInvitation=detachedInvitation; s.events.push(audit);
  return validate(s);
 }
 function freeze(x) { if(x&&typeof x==='object') { Object.values(x).forEach(freeze); Object.freeze(x); } return x; }
@@ -330,7 +307,7 @@ export function snapshot(state,asOf,roundId=null,staleAfterMs=15*60000) {
   const known=t.observations.filter(o=>o.observedAt!==null).sort((a,b)=>b.observedAt.localeCompare(a.observedAt)||b.at.localeCompare(a.at));
   const latestObservation=known[0]??null, latestProgress=known.find(o=>o.progress)??null;
   const revoked=revocationFor(s,t.workerId),hold=handoffHold(s,t.id);
-  return {...t,...(revoked?.revocation.taskIds.includes(t.id)?{revocation:{operationId:revoked.id,summary:revoked.summary,execution:'unknown'}}:{}),...(hold?{handoffRisk:{operationId:hold.id,status:'unresolved'}}:{}),...(dispatchHold(s,t.workerId)?{dispatchRisk:{operationId:dispatchHold(s,t.workerId).id,status:'unresolved'}}:{}),delivery:deliveryState(s,t),elapsedMs:duration(t.assignedAt),phaseElapsedMs:duration(t.stages.at(-1).startedAt),stages:t.stages.map(p=>({...p,durationMs:p.startedAt===null?null:Date.parse(p.endedAt??end)-Date.parse(p.startedAt)})),latestObservation,latestProgress,freshness:latestObservation===null?'unknown':Date.parse(asOf)-Date.parse(latestObservation.observedAt)>staleAfterMs?'stale':'recorded'};
+  return {...t,...(revoked?.revocation.taskIds.includes(t.id)?{revocation:{operationId:revoked.id,summary:revoked.summary,execution:'unknown'}}:{}),...(hold?{handoffRisk:{operationId:hold.id,status:'unresolved'}}:{}),delivery:deliveryState(s,t),elapsedMs:duration(t.assignedAt),phaseElapsedMs:duration(t.stages.at(-1).startedAt),stages:t.stages.map(p=>({...p,durationMs:p.startedAt===null?null:Date.parse(p.endedAt??end)-Date.parse(p.startedAt)})),latestObservation,latestProgress,freshness:latestObservation===null?'unknown':Date.parse(asOf)-Date.parse(latestObservation.observedAt)>staleAfterMs?'stale':'recorded'};
  });
  const registry=s.schemaVersion===2?{registryId:s.registry.registryId,migrationId:s.registry.migrationId,phase:s.registry.phase,teamRevision:s.registry.teamRevision,readyMemberIds:structuredClone(s.registry.readyMemberIds)}:undefined;
  const payload={schemaVersion:s.schemaVersion,sourceVersion:s.version,sourceUpdatedAt:s.updatedAt,asOf,staleAfterMs,roundId,team:s.team,members:roundId===null?s.members:s.rounds.find(r=>r.id===roundId).members,rounds:s.rounds.filter(r=>roundId===null||r.id===roundId),tasks,events:s.events.filter(e=>roundId===null||e.roundId===roundId),reporting:s.reporting,...(registry?{registry}:{}),sourceKinds:[...new Set([s.team.source.kind,...s.events.map(e=>e.source.kind)])],navigation:{available:false,reason:'独立 HTML 的受支持导航尚未验证；Agent 导航工具不是网页 API'}};

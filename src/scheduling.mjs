@@ -1,5 +1,6 @@
 import { validate, validateCaller } from './runtime.mjs';
 import { readState, transact } from './store.mjs';
+import {dispatchHold} from './dispatch-contract.mjs';
 import {revocationFor,handoffHold} from './worker-revocation.mjs';
 
 const check=(ok,message)=>{if(!ok)throw new Error(message);};
@@ -49,8 +50,8 @@ export function planDispatch(state,caller,workerId) {
   check(historical?.role==='Worker'&&historical.lifecycle==='active'&&historical.binding.status==='bound'&&same(historical.binding,worker.binding),'Worker identity differs from historical binding');
  }
  const reserved=tasks.filter(t=>t.status!=='queued'),queued=tasks.filter(t=>t.status==='queued');
- const held=queued.length>0&&!!handoffHold(state,queued[0].id);
+ const conflict=dispatchHold(state,workerId),held=!!conflict||(queued.length>0&&!!handoffHold(state,queued[0].id));
  return {sourceVersion:state.version,sourceUpdatedAt:state.updatedAt,identityAssurance:'caller-declared',readOnly:true,executed:false,
   workerId,decision:reserved.length||held?'held':queued.length?'ready':'no-work',reservedTaskIds:reserved.map(t=>t.id),queuedTaskIds:queued.map(t=>t.id),
-  nextTaskId:reserved.length||held?null:queued[0]?.id??null,requiresNativeIdleCheck:true,hostRequest:null,...(held?{reason:'handoff-execution-risk-unresolved'}:{})};
+  nextTaskId:reserved.length||held?null:queued[0]?.id??null,requiresNativeIdleCheck:true,hostRequest:null,...(held?{reason:conflict?'dispatch-conflict-unresolved':'handoff-execution-risk-unresolved'}:{})};
 }

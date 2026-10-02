@@ -4,8 +4,9 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { validate, evolve } from './runtime.mjs';
 import { projectRegistryState, withFileLocks, withStateGuard } from './registry-projection.mjs';
+import {validateDispatchObjects} from './dispatch-objects.mjs';
 
-export async function readRawState(path) { return validate(JSON.parse(await readFile(path,'utf8'))); }
+export async function readRawState(path) { const state=validate(JSON.parse(await readFile(path,'utf8')));await validateDispatchObjects(path,state);return state; }
 export async function readState(path,options={}) { return projectRegistryState(await readRawState(path),resolve(path),options); }
 async function replace(temp,path) {
  // Windows readers/scanners can briefly deny replacement. Retry only this

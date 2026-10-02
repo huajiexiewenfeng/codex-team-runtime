@@ -354,6 +354,10 @@ Windows 的替换遇到 EPERM/EBUSY 时，在持锁期间仅重试同一次 rena
 
 ## 同一任务的派发恢复
 
+已统一升级并启用 E04 的 queued 任务使用 [E04 派发接口](e04-dispatch-runtime-usage.md)：
+首次 prepare 只提交 startTask 并返回一次发送许可，不需要本节的首次 check→claim。
+本节仍适用于旧 attempt；不得对 E04 attempt 使用旧 delivery-check/claim。
+
 此入口只记录 Manager→Worker 首次任务交接的发送证据和尝试，不执行原生发送、不释放 Worker、不重新分配或取消已启动任务。先阅读配套 Skill 的 `references/delivery-recovery.md`。已有 assign/startTask 但无发送记录时默认为 unknown；缺失唯一原始分配审计时不可恢复，不能把旧记录缺失解释成从未发送。
 
 ```text

@@ -1,3 +1,4 @@
+import {validateDispatchObjects} from './dispatch-objects.mjs';
 import {open,stat,mkdir,writeFile,realpath} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -90,7 +91,7 @@ export async function collectTaskTimeline(manifest,baseDirectory) {
       if(!info.isFile()||info.size>16*1024*1024)throw new Error('Timeline state must be a regular file within 16 MiB');
       const bytes=Buffer.alloc(info.size);let offset=0;
       while(offset<bytes.length){const {bytesRead}=await handle.read(bytes,offset,bytes.length-offset,offset);if(!bytesRead)throw new Error('Timeline state truncated');offset+=bytesRead;}
-      const state=JSON.parse(bytes.toString('utf8'));
+      const state=JSON.parse(bytes.toString('utf8'));await validateDispatchObjects(path,state);
       report.businessTimeline={...buildStateTimeline(state,{teamId:manifest.teamId,taskId:manifest.taskId,roundId:descriptor.roundId}),sourceByteBoundary:bytes.length,sourceSha256:createHash('sha256').update(bytes).digest('hex')};
       if(manifest.noticeSource!==undefined) {
         fields(manifest.noticeSource,['path']);

@@ -1,3 +1,5 @@
+import {validateDispatchObjects} from './dispatch-objects.mjs';
+import {isDispatch} from './dispatch-contract.mjs';
 import { pathToFileURL } from 'node:url';
 import { validate } from './runtime.mjs';
 import {revocationFor} from './worker-revocation.mjs';
@@ -35,7 +37,9 @@ export function adaptRegistryRequest(request) {
 async function main() {
  let input = '';
  for await (const chunk of process.stdin) input += chunk;
- const result = adaptRegistryRequest(JSON.parse(input));
+ const {statePath,...request}=JSON.parse(input);
+ if(request.state?.events?.some(isDispatch)){check(typeof statePath==='string','E04 inspection requires trusted statePath');await validateDispatchObjects(statePath,request.state);}
+ const result = adaptRegistryRequest(request);
  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

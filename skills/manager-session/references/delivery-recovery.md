@@ -1,5 +1,10 @@
 # Same-task delivery recovery
 
+For an E04-enabled runtime and an E04 attempt, use
+[E04 dispatch](dispatch-runtime.md). The legacy commands below reject E04
+attempts; never mix the two recovery protocols. A new E04 prepare itself creates
+the first send reservation, without the legacy first check/claim pair.
+
 For Worker-to-Manager stage completion and submission, use
 [completion notification](completion-notification.md). The assignment claims below
 must not track, retry or suppress completion notifications.

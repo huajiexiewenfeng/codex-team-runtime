@@ -165,7 +165,7 @@ class TeamRegistry:
             from .runtime_link import invoke_adapter, read_state
             node, root = self._trusted_runtime()
             _, state = read_state(Path(team["runtime"]["statePath"]))
-            invoke_adapter(node, root, {"action": "inspect", "state": state})
+            invoke_adapter(node, root, {"action": "inspect", "state": state, "statePath": team["runtime"]["statePath"]})
             self._validate_link_state(registry, team, state)
             runtime_phase = state["registry"]["phase"]
         return self._capsule(registry, team, member, runtime_phase=runtime_phase)
@@ -258,13 +258,13 @@ class TeamRegistry:
             state_path = Path(runtime["statePath"])
             with state_locked(state_path):
                 _, state = read_state(state_path)
-                invoke_adapter(node, root, {"action": "inspect", "state": state})
+                invoke_adapter(node, root, {"action": "inspect", "state": state, "statePath": str(state_path)})
                 self._validate_link_state(registry, linked_team, state)
                 if state["registry"]["phase"] != "active":
                     _fail("MIGRATION_PENDING", "Linked state is still prepared")
                 if action == "exit_member":
                     invoke_adapter(node, root, {
-                        "action": "check_exit", "state": state,
+                        "action": "check_exit", "state": state, "statePath": str(state_path),
                         "memberId": request["member_id"],
                     })
                 result, changed = mutation(registry)

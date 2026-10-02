@@ -259,7 +259,7 @@ def adopt(owner: Any, actor: dict[str, str], request: dict[str, Any]) -> dict[st
                 receipt = previous["result"].copy()
                 _, source = _source_from_backup(backup_path, request)
                 invoke_adapter(node, root, {"action": "inspect", "state": source})
-                invoke_adapter(node, root, {"action": "inspect", "state": current_state})
+                invoke_adapter(node, root, {"action": "inspect", "state": current_state, "statePath": str(state_path)})
                 _verify_prepared(current_state, registry, request, registry_path, active_ok=True)
 
                 if current_state["registry"]["phase"] == "prepared":

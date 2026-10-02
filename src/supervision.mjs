@@ -1,3 +1,4 @@
+import {dispatchHold} from './dispatch-contract.mjs';
 import { validate, validateCaller } from './runtime.mjs';
 import { prepareSubmissionNotice } from './submission-notice.mjs';
 import { readState } from './store.mjs';
@@ -23,6 +24,7 @@ export function planSupervision(state,caller,cursors=[]) {
  const recoverySummary={pendingReview:0,reviewing:0,blocked:0,identityBlocked:0};
  for(const task of state.tasks) {
   const round=state.rounds.find(r=>r.id===task.roundId);
+  if(dispatchHold(state,task.workerId))taskChecks.push({taskId:task.id,roundId:task.roundId,worker:null,taskStatus:task.status,nextAction:'reconcile-dispatch-conflict',identityStatus:'held',reason:'Contradictory dispatch evidence; further starts held',requiresManagerReview:true});
   if(handoffHold(state,task.id))taskChecks.push({taskId:task.id,roundId:task.roundId,worker:null,taskStatus:task.status,nextAction:'resolve-handoff-execution-risk',identityStatus:'held',reason:'Old Worker execution unknown; require stop or isolation evidence',requiresManagerReview:true});
   if(round.status!=='open'||['approved','queued','cancelled'].includes(task.status))continue;
   const historical=round.members.find(m=>m.id===task.workerId),current=state.members.find(m=>m.id===task.workerId);
