@@ -64,7 +64,11 @@ export function planSubmissionReview(state, caller, notice) {
   const ctx = context(state, notice.taskId);
   check(isDeepStrictEqual(caller, identity(ctx.manager)), 'Only current Manager may receive submissions');
   const submission = ctx.submissions.find(x => x.event.id === notice.submissionId);
-  check(submission && isDeepStrictEqual(notice, makeNotice(state, ctx, submission)), 'Notice does not match durable submission');
+  if (!(submission && isDeepStrictEqual(notice, makeNotice(state, ctx, submission)))) {
+    const error = new Error('Notice does not match durable submission');
+    error.code = 'NOTICE_MISMATCH';
+    throw error;
+  }
   const base = { notificationId: notice.notificationId, sourceVersion: state.version, taskId: ctx.task.id,
     roundId: ctx.round.id, managerId: ctx.manager.id, identityAssurance: 'caller-declared', readOnly: true };
   let reason;
@@ -104,3 +108,5 @@ export async function receiveSubmissionNotice({ statePath, caller, notice, event
     roundId: plan.roundId, taskId: plan.taskId });
   return { ...plan, readOnly: false, changed: true, sourceVersion: next.version, hostActionExecuted: false };
 }
+
+export { context as submissionContext, makeNotice };

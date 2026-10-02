@@ -189,6 +189,14 @@ export function renderTimelineMarkdown(report) {
     lines.push('', '| 声明时间 | 角色 | 业务事件 | 证据 ID |', '| --- | --- | --- | --- |');
     for(const e of business.events)lines.push(`| ${date(e.declaredAt)} | ${e.role} | ${e.kind} | ${e.eventId} |`);
   }
+  if(report.noticeTimeline) {
+    const notice=report.noticeTimeline;
+    lines.push('', '## 提交通知（独立账本快照）', '', `账本版本 ${notice.ledgerVersion}；团队账本 ${notice.ledgerBytes} 字节；此任务 ${notice.attemptCount} 次 claim。`,
+      '', 'claim 到结果登记包含 Agent 调度、宿主发送与补记，不是网络耗时。账本大小是快照值，没有上一快照时不计算增长率。',
+      '', '| 区间 | submission | attempt | 历时 | 时钟倒退 |', '| --- | --- | --- | --- | --- |');
+    for(const item of notice.intervals)lines.push(`| ${item.kind} | ${item.submissionId} | ${item.attemptId} | ${fmt(item.durationMs)} | ${item.clockRegression?'是':'否'} |`);
+  }
+  if(report.noticeReceiveObservation)lines.push('', `原生选定记录中的 NOTICE_MISMATCH：${report.noticeReceiveObservation.noticeMismatchCount??'观测不可用'}；部分覆盖，不由旧文本推断零次。`);
   lines.push('',`盲区：${report.coverage.missing.join(', ')}`, '', `诊断条数：${report.diagnostics.length}（详见 JSON）。`,'');
   return lines.join('\n');
 }

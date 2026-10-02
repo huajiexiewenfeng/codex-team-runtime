@@ -152,6 +152,8 @@ def create_server(
                 return _json_result(exc.as_dict(), is_error=True)
 
         if node_executable is not None and runtime_root is not None:
+            from .notice_tools import register_notice_tools
+            register_notice_tools(server, team_registry, recorder, runtime_revision, _json_result)
             startup_ledger = StartupLedger(team_registry)
 
             @server.tool(

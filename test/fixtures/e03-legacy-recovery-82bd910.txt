@@ -205,7 +205,3 @@ export const trackSubmissionNotice = args => access(args, 'track');
 export const planNoticeDelivery = args => access(args, 'plan');
 export const claimNoticeDelivery = args => access(args, 'claim');
 export const recordNoticeResult = args => access(args, 'result');
-
-// Shared state-machine primitives. E03 composes them under one existing guard;
-// the public legacy operations above retain their original admission rules.
-export { validateResult, validateLedger, loadLedger, checkNotice, requireReady, decision, lastResult, timestamp };

@@ -18,6 +18,13 @@ const event = (overrides = {}) => ({
 });
 const input = records => ({ registryId: 'registry-demo', teamId: 'demo-team', sourceKind: 'fixture', records });
 
+test('E03 observation metadata roundtrips without accepting notice bodies', () => {
+  const e = event({tool:'team_context.notice',outcome:'success',notice:{action:'prepare',taskId:'t',submissionId:'s',operationId:'p',attemptId:'a',ledgerVersion:2,requestBytes:150,responseBytes:300}});
+  const report = buildServerMcpReport(input([{event:e,sourceRefs:['fixture']}]),daily());
+  assert.deepEqual(report.events[0].event.notice,e.notice);
+  assert.throws(()=>buildServerMcpReport(input([{event:{...e,notice:{...e.notice,prompt:'private'}},sourceRefs:['fixture']}]),daily()),/notice/);
+});
+
 test('deduplicates identical key-order variants, keeps retries, sorts, filters cutoff and groups every day', () => {
   const first = event(), duplicate = Object.fromEntries(Object.entries(first).reverse());
   const retry = event({ eventId: '00000000-0000-4000-8000-000000000002', role: 'Manager', reason: 'manual', outcome: 'inactive' });

@@ -5,6 +5,8 @@ import hashlib
 import json
 import subprocess
 import sys
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -20,7 +22,7 @@ from codex_team_context.team_policy import onboarding_receipt
 from codex_team_context.team_registry import TeamRegistry, initialize_registry
 
 
-NODE = Path("C:/Program Files/nodejs/node.exe")
+NODE = Path(os.environ.get('CODEX_TEST_NODE') or shutil.which('node') or 'C:/Program Files/nodejs/node.exe')
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -336,7 +338,7 @@ def test_linked_onboarding_and_real_node_python_export_projection(linked) -> Non
         "target_thread_id": "fixture-new-worker", "authorization_ref": "approved:new",
     })
     runtime = (ROOT / "src" / "registry-projection.mjs").as_uri()
-    python = ROOT / "artifacts" / "team-context-venv" / "Scripts" / "python.exe"
+    python = Path(sys.executable)
     script = f"""
 import fs from 'node:fs';
 import {{projectRegistryState}} from {json.dumps(runtime)};

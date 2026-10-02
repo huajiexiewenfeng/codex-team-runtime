@@ -1,10 +1,29 @@
 # MCP team observation events
 
 The MCP server can optionally write one bounded JSON event for each observed
-`team_context.read`, `team_context.manage`, or `team_context.startup` call.
+`team_context.read`, `team_context.manage`, `team_context.startup`,
+`team_context.notice`, or `team_context.notice_status` call.
 Collection is off by default. It is available only in Registry mode and requires
 an absolute output root and either a reloadable configuration or a static
 team allowlist. Both modes remain off unless explicitly configured.
+
+E03 notice events add an optional `notice` object with action, task/submission,
+operation/attempt IDs, reason code, source/ledger versions and request/response
+byte counts. These are correlation and size metadata; notice bodies, hostRequest,
+prompt and external evidence text are never copied. Existing per-team observation
+authorization and best-effort failure semantics still apply. The daily MCP view
+accepts both tools and exposes their measured `durationMs` with the same scope.
+
+For an explicitly collected task timeline, add `noticeSource: {"path": "..."}`
+alongside `stateSource`. The ledger must belong to the canonical selected state
+path and team. The collector reads a bounded snapshot, retains its SHA-256/byte
+size and exports submit-to-claim and claim-to-result intervals. The latter
+includes scheduling, native send and result recording; it is not network time.
+Whole-team ledger bytes are a snapshot, not an inferred per-task growth delta.
+No input means no notice collection. Existing native item selections can expose
+`NOTICE_MISMATCH` only from exact structured failed `receive-submission` output;
+duplicate native item selection is rejected. Counts cover selected items only,
+and absent codes remain unavailable rather than zero. No message text is exported.
 
 ## Reloadable team allowlist (recommended)
 

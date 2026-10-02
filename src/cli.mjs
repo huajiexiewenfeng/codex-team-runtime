@@ -205,4 +205,4 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
  if(!service?.close)return;
  const stop=()=>{void service.close().catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});};
  process.once('SIGINT',stop);process.once('SIGTERM',stop);
-}).catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});
+}).catch(error=>{console.error(error.code === 'NOTICE_MISMATCH' ? JSON.stringify({code:error.code,message:error.message}) : `Error: ${error.message}`);process.exitCode=1;});

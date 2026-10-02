@@ -20,7 +20,7 @@ REASONS = (
     "onboarding", "resume", "post_compaction", "before_dispatch", "before_delivery",
     "before_review", "identity_conflict", "manual", "unknown",
 )
-_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup"}
+_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status"}
 _OUTCOMES = {"matched", "inactive", "unmatched", "success", "error", "unexpected_error"}
 _ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -120,7 +120,7 @@ class ObservationRecorder:
 
     def record(
         self, started: tuple[str, int], identity: dict[str, Any], tool: str, reason: str,
-        outcome: str, error_code: str | None,
+        outcome: str, error_code: str | None, details: dict[str, Any] | None = None,
     ) -> None:
         try:
             if not self.allows(identity["teamId"]):
@@ -155,6 +155,14 @@ class ObservationRecorder:
                 "runtimeRevision": self.runtime_revision,
                 "runtimeRevisionSource": "unknown" if self.runtime_revision is None else "operator-declared",
             }
+            if details is not None:
+                allowed = {"action", "taskId", "submissionId", "operationId", "attemptId", "reasonCode", "sourceVersion", "ledgerVersion", "requestBytes", "responseBytes"}
+                if not isinstance(details, dict) or not details.keys() <= allowed:
+                    raise ValueError("Invalid E03 observation fields")
+                for value in details.values():
+                    if not ((type(value) is int and value >= 0) or (isinstance(value,str) and len(value)<=256 and all(ord(c)>=32 for c in value))):
+                        raise ValueError("Invalid E03 observation value")
+                event["notice"] = details
             self._publish(event)
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")
@@ -190,6 +198,7 @@ def observed_call(
     reason: str,
     operation: Callable[[], T],
     classify: Callable[[T], str],
+    details: Callable[[T | None], dict[str, Any]] | None = None,
 ) -> T:
     if recorder is None:
         return operation()
@@ -216,7 +225,7 @@ def observed_call(
         if identity is None:
             return
         try:
-            recorder.record(started, identity, tool, reason, outcome, error_code)
+            recorder.record(started, identity, tool, reason, outcome, error_code, **({"details":details(None)} if details else {}))
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")
 
@@ -233,7 +242,8 @@ def observed_call(
             outcome = classify(result)
             if outcome not in _OUTCOMES:
                 raise ValueError("Invalid internal observation outcome")
-            recorder.record(started, identity, tool, reason, outcome, None)
+            code = result.get("reasonCode") if outcome == "error" and isinstance(result,dict) else None
+            recorder.record(started, identity, tool, reason, outcome, code, **({"details":details(result)} if details else {}))
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")
     return result

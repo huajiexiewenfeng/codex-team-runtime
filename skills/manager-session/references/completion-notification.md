@@ -30,6 +30,40 @@ bypass a denial. Do not invent a transport result for an unsent request.
 
 ## Worker completion checkpoint
 
+### E03 MCP route for an explicitly installed linked team
+
+When `team_context.notice` and `team_context.notice_status` are discovered and the
+team is connected and currently ready, use the trusted runtime's
+`docs/design/e03-notice-runtime.md` contract after durable submit. Preserve the
+existing native identity and reporting grant. An unavailable MCP entry is an
+integration error; do not improvise shell request-file chains or create a team.
+
+1. Keep team/task/submission and a fresh prepare operation ID in visible progress
+   before calling `notice(action=prepare)`. Use an ASCII ID matching
+   `[A-Za-z0-9_-]{1,128}` and retain it for retries. For first tracking, pass a
+   verified baseline: `outcome=not-attempted`, `evidence.kind=observation`, with
+   the actual context reference and description. Missing history is reconcile,
+   not permission to populate this declaration automatically.
+2. Only a fresh `sendNow=true` response permits one native send opportunity.
+   Keep its attemptId and transfer hostRequest hostId/threadId/prompt unchanged
+   to the authorized native tool. A prepare replay or status never grants a send.
+3. Keep a distinct result operation ID in visible progress, then call
+   `notice(action=result)` for that exact attempt with the real outcome/evidence.
+   On a lost result response, replay the same ID and exact input. A recorded
+   successful result ends notification work without an extra status poll.
+4. Recover by prepare operation ID or attempt ID through `notice_status`.
+   `latestAttemptId` is a correlation hint only. A persisted unknown claim cannot
+   be retried from timeout, silence, or absent visible messages. Service-confirmed
+   execution end plus a successful missing-operation read can permit retry of
+   an unpersisted original request under the usual history gates. The bridge owns
+   process/lock recovery; never guess PID ownership or delete lock files.
+
+Visible IDs are recovery references, not ledger authority or evidence of delivery.
+Manager may record an exact result under their own identity or inspect durable
+`pendingSubmissions` at an existing authorized review checkpoint. Neither review
+nor approval changes unknown transport evidence into accepted delivery. The CLI
+route below remains for compatible legacy operations and explicit diagnostics.
+
 At each agreed stage checkpoint, formal submission or actionable blocker, recover
 own/team/leader context using team-context.md. Save real artifacts, changed scope,
 verification commands/results, risks and unmet criteria. Notify the verified Manager
@@ -60,7 +94,9 @@ writing this summary or reading a Skill does not require another full check.
 
 - **Formal submission:** the original Worker performs its authorized durable
   `submit`, including stage/version and absolute evidence paths in its summary.
-  Follow [submission notices](operations.md#submission-notices) and the trusted
+  Use the E03 MCP route above when installed and discovered. For a compatible
+  legacy runtime or explicit diagnostics, follow
+  [submission notices](operations.md#submission-notices) and the trusted
   runtime's `docs/submission-recovery.md`: prepare/save the full notice, reconcile
   send history, track, claim, send the freshly claimed unchanged `hostRequest`
   once, and record the actual result. Do not add invented notice JSON fields or

@@ -29,7 +29,7 @@ def test_separate_stdio_connections_recover_receipt_without_native_listing(start
         async with Client(params) as client:
             listed = await client.list_tools()
             catalog = {t.name: t for t in listed.tools}
-            assert set(catalog) == {"team_context.read", "team_context.manage", "team_context.startup"}
+            assert set(catalog) == {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status"}
             assert catalog["team_context.startup"].annotations.destructive_hint is False
             value(await client.call_tool("team_context.startup", {**common, "request": {
                 "action": "prepare", "operation_id": "op-worker", "team_id": "team", "member_id": "worker",

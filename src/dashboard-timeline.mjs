@@ -19,6 +19,9 @@ export function renderDashboardTimeline(r,{stale=false,freshness=null}={}){
  validateReport(r);
  const table=(label,headers,rows)=>`<details><summary>${esc(label)} · ${rows.length} 条</summary><div class="timeline-overflow" tabindex="0" role="region" aria-label="${esc(label)}"><table><caption>最多显示前 300 条；完整记录见 JSON 报告</caption><thead><tr>${headers.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.slice(0,300).map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
  const stages=r.businessTimeline?.stages??[];
+ const notice=r.noticeTimeline;
+ const noticeHtml=notice?`<p>通知账本快照：版本 ${esc(notice.ledgerVersion)} · 团队账本 ${esc(notice.ledgerBytes)} 字节 · 此任务 ${esc(notice.attemptCount)} 次 claim。结果登记间隔含调度与补记，不是网络耗时。</p>`+
+ table('提交通知区间',['口径','submission','attempt','历时','时钟倒退'],(notice.intervals??[]).map(i=>[i.kind,i.submissionId,i.attemptId,duration(i.durationMs),i.clockRegression?'是':'否'])):'';
  const freshnessHtml=freshness?`<p>阶段数据：${freshness.stageData.mode==='refreshed-state'?'最新台账重建（仅本次展示，未覆盖历史报告）':'历史报告快照'} · 台账版本 ${esc(freshness.stageData.sourceVersion??'未知')} · 台账更新时间（UTC） ${esc(freshness.stageData.sourceUpdatedAt??'未知')} · 本次生成时间（UTC） ${esc(freshness.stageData.generatedAt??'未知')}</p><p>工具观测：${freshness.observations.status==='historical'?'沿用历史采样，未重新采集':'未采集或缺少观测证据'} · 最后观测事件（UTC） ${esc(freshness.observations.latestObservedAt??'未知')}（不代表完整覆盖截止）</p><p>采样窗口：${esc(freshness.observations.windows.map(w=>`${w.from??'未知'} — ${w.to??'未知'}`).join('；')||'未知')}。覆盖缺口：${esc(freshness.observations.missing.join('、')||'覆盖仍未核实')}。更新阶段数据不采集日志，不刷新 Token/MCP。</p>`:'';
  return `<section class="timeline-card" aria-label="任务时间线"><h2>任务时间线 · ${esc(r.taskId)}</h2><p>部分覆盖 · 阶段与工具观测为独立数据来源</p>${freshnessHtml}<p>端到端历时：<strong>${duration(r.endToEndMs)}</strong> · 外层工具区间并集：${duration(r.observedToolUnionMs)}</p><p class="timeline-warning">${stale?'业务状态已有新版本，以下为旧快照。':''}业务声明时间不等于程序执行时间。区间可能重叠，不可相加；未知不等于零。重新读取不会采集日志。</p>`+
  table('业务声明阶段',['阶段','声明开始（UTC）','声明结束（UTC）','声明历时'],stages.map(s=>[Object.hasOwn(stageNames,s.status)?stageNames[s.status]:s.status,s.declaredStartAt,s.declaredEndAt,s.kind==='terminal-state'?'终态点':duration(s.durationMs)]))+
@@ -28,7 +31,8 @@ export function renderDashboardTimeline(r,{stale=false,freshness=null}={}){
  table('原生进程观测（含轮询间隔，非 CPU 时间）',['起点证据','完成证据','观测历时','退出码','缺口'],(r.processSpans??[]).map(s=>[s.startEventId,s.endEventId,duration(s.durationMs),s.exitCode??'未知',s.missingReason]))+
  table('宿主内部调用报告（选定条目，起止未知，不与外层相加）',['来源','角色','条目 ID','类型','报告耗时','退出码'],(r.nativeObservations??[]).flatMap(s=>s.items.map(i=>[s.sourceRef,s.role,i.itemId,i.kind,duration(i.durationMs),i.exitCode??'未知'])))+
  table('工具报告耗时（独立口径）',['证据','数据块','报告耗时'],(r.reportedDurations??[]).map(d=>[d.eventId,d.block,duration(d.durationMs)]))+
- table('未归因日志间隔',['起点','终点','间隔'],r.gaps.map(g=>[g.startEventId,g.endEventId,duration(g.durationMs)]))+'</section>';
+ table('未归因日志间隔',['起点','终点','间隔'],r.gaps.map(g=>[g.startEventId,g.endEventId,duration(g.durationMs)]))+noticeHtml+
+ (r.noticeReceiveObservation?`<p>选定宿主记录中的 NOTICE_MISMATCH：${esc(r.noticeReceiveObservation.noticeMismatchCount??'观测不可用')}；部分覆盖，旧版本缺少错误码不能推断零次。</p>`:'')+'</section>';
 }
 export async function readTimelineJson(path,maxBytes=16*1024*1024){
  const file=await open(path,'r');let r;

@@ -4,7 +4,7 @@ const fields = ['schemaVersion', 'eventId', 'startedAt', 'completedAt', 'duratio
 const roles = ['Manager', 'Liaison', 'Worker'];
 const reasons = ['onboarding', 'resume', 'post_compaction', 'before_dispatch', 'before_delivery', 'before_review', 'identity_conflict', 'manual', 'unknown'];
 const outcomes = ['matched', 'inactive', 'unmatched', 'success', 'error', 'unexpected_error'];
-const tools = ['team_context.read', 'team_context.manage', 'team_context.startup'];
+const tools = ['team_context.read', 'team_context.manage', 'team_context.startup', 'team_context.notice', 'team_context.notice_status'];
 const idPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const errorPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -18,7 +18,17 @@ const timestamp = (value, label) => check(typeof value === 'string' && /^\d{4}-\
 const safeCount = (value, label, minimum = 0) => check(Number.isSafeInteger(value) && value >= minimum, `Invalid ${label}`);
 
 function validateEvent(event, scope) {
-  exact(event, fields, 'MCP event');
+  exact(event, Object.hasOwn(event,'notice') ? [...fields,'notice'] : fields, 'MCP event');
+  if (Object.hasOwn(event,'notice')) {
+    check(['team_context.notice','team_context.notice_status'].includes(event.tool),'Invalid notice observation tool');
+    const allowed=['action','taskId','submissionId','operationId','attemptId','reasonCode','sourceVersion','ledgerVersion','requestBytes','responseBytes'];
+    check(isObject(event.notice) && Object.keys(event.notice).every(k=>allowed.includes(k)),'Invalid notice observation fields');
+    for(const [key,value] of Object.entries(event.notice)) {
+      if(['sourceVersion','ledgerVersion','requestBytes','responseBytes'].includes(key)) safeCount(value,key);
+      else check(typeof value==='string' && value.length<=256 && !/[\u0000-\u001f\ud800-\udfff]/u.test(value),'Invalid notice observation value');
+    }
+    check(['prepare','result','status'].includes(event.notice.action),'Invalid notice action');
+  }
   check(event.schemaVersion === 1, 'Invalid MCP event schemaVersion');
   check(typeof event.eventId === 'string' && uuidPattern.test(event.eventId), 'Invalid eventId');
   timestamp(event.startedAt, 'startedAt'); timestamp(event.completedAt, 'completedAt');

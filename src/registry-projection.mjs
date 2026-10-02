@@ -100,7 +100,7 @@ export async function exportRegistryProjection(state, statePath, options = {}) {
  const runner = options.execFile ?? executeFile;
  let stdout;
  try {
-  ({ stdout } = await runner(python, argv, { encoding:'utf8', windowsHide:true, timeout:10000, maxBuffer:4*1024*1024, shell:false }));
+  ({ stdout } = await runner(python, argv, { encoding:'utf8', windowsHide:true, timeout:options.exportTimeout ?? 10000, maxBuffer:4*1024*1024, shell:false }));
  } catch (error) {
   throw new Error(`Registry exporter failed: ${error.message}`, { cause:error });
  }
@@ -140,7 +140,7 @@ export async function withStateGuard(statePath, reportingPath, readRawState, ope
   check(resolve(reportingPath) !== resolve(statePath), 'Reporting ledger must be separate from business state');
   locks.push(`${reportingPath}.lock`);
  }
- return withFileLocks(locks, async () => {
+ return (options.lockRunner ?? withFileLocks)(locks, async () => {
   const current = await readRawState(statePath);
   check(current.schemaVersion === observed.schemaVersion, 'State linkage changed while acquiring locks');
   if (current.schemaVersion === 2) check(JSON.stringify(current.registry) === JSON.stringify(observed.registry), 'Registry linkage changed while acquiring locks');

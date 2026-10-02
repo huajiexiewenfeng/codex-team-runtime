@@ -1,9 +1,10 @@
-import {open,stat,mkdir,writeFile} from 'node:fs/promises';
+import {open,stat,mkdir,writeFile,realpath} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {createTimelineParser,buildTaskTimeline,renderTimelineMarkdown} from './task-timeline.mjs';
 import {buildStateTimeline} from './task-timeline-state.mjs';
 import {projectNativeTimeline} from './task-timeline-native.mjs';
+import {buildNoticeTimeline} from './notice-timeline.mjs';
 
 export async function readTimelineSource(path,descriptor,{chunkSize=1024*1024,afterBoundary}={}) {
   if(!Number.isSafeInteger(chunkSize)||chunkSize<1||chunkSize>1024*1024)throw new Error('Invalid chunk size');
@@ -39,7 +40,7 @@ const fields=(value,allowed)=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!allowed.includes(k)))throw new Error('Unknown or invalid timeline manifest field');
 };
 export async function collectTaskTimeline(manifest,baseDirectory) {
-  fields(manifest,['teamId','taskId','timeZone','sources','milestones','stateSource','nativeSources']);
+  fields(manifest,['teamId','taskId','timeZone','sources','milestones','stateSource','nativeSources','noticeSource']);
   if(!Array.isArray(manifest.sources)||manifest.sources.length===0||manifest.sources.length>32)throw new Error('Expected 1..32 explicit timeline sources');
   if(manifest.milestones!==undefined){
     fields(manifest.milestones,['request','delivery']);
@@ -76,6 +77,7 @@ export async function collectTaskTimeline(manifest,baseDirectory) {
       }finally{await file.close();}
     }
   }
+  if(manifest.noticeSource!==undefined&&manifest.stateSource===undefined)throw new Error('Notice timeline requires an explicit state snapshot');
   if(manifest.stateSource!==undefined) {
     const descriptor=manifest.stateSource;
     fields(descriptor,['path','roundId']);
@@ -88,11 +90,26 @@ export async function collectTaskTimeline(manifest,baseDirectory) {
       if(!info.isFile()||info.size>16*1024*1024)throw new Error('Timeline state must be a regular file within 16 MiB');
       const bytes=Buffer.alloc(info.size);let offset=0;
       while(offset<bytes.length){const {bytesRead}=await handle.read(bytes,offset,bytes.length-offset,offset);if(!bytesRead)throw new Error('Timeline state truncated');offset+=bytesRead;}
-      report.businessTimeline={...buildStateTimeline(JSON.parse(bytes.toString('utf8')),{teamId:manifest.teamId,taskId:manifest.taskId,roundId:descriptor.roundId}),sourceByteBoundary:bytes.length,sourceSha256:createHash('sha256').update(bytes).digest('hex')};
+      const state=JSON.parse(bytes.toString('utf8'));
+      report.businessTimeline={...buildStateTimeline(state,{teamId:manifest.teamId,taskId:manifest.taskId,roundId:descriptor.roundId}),sourceByteBoundary:bytes.length,sourceSha256:createHash('sha256').update(bytes).digest('hex')};
+      if(manifest.noticeSource!==undefined) {
+        fields(manifest.noticeSource,['path']);
+        if(typeof manifest.noticeSource.path!=='string'||!manifest.noticeSource.path.trim())throw new Error('Expected explicit notice ledger path');
+        const ledgerHandle=await open(resolve(baseDirectory,manifest.noticeSource.path),'r');
+        try {
+          const info=await ledgerHandle.stat();
+          if(!info.isFile()||info.size>16*1024*1024)throw new Error('Invalid notice ledger snapshot');
+          const raw=Buffer.alloc(info.size);let offset=0;
+          while(offset<raw.length){const {bytesRead}=await ledgerHandle.read(raw,offset,raw.length-offset,offset);if(!bytesRead)throw new Error('Truncated notice ledger');offset+=bytesRead;}
+          report.noticeTimeline={...buildNoticeTimeline(state,JSON.parse(raw.toString('utf8')),{statePath:await realpath(path),taskId:manifest.taskId,ledgerBytes:raw.length}),sourceSha256:createHash('sha256').update(raw).digest('hex')};
+        } finally {await ledgerHandle.close();}
+      }
       report.rulesVersion='task-timeline-v3';
       report.coverage.missing=report.coverage.missing.filter(value=>value!=='business-state-events');
     } finally {await handle.close();}
   }
+  const mismatchItems=(report.nativeObservations??[]).flatMap(source=>source.items.filter(item=>item.noticeErrorCode==='NOTICE_MISMATCH'));
+  report.noticeReceiveObservation={noticeMismatchCount:mismatchItems.length||null,coverage:'selected-native-items',missingIsNotZero:true};
   return report;
 }
 

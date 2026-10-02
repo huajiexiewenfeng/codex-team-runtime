@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { createState, evolve } from '../src/runtime.mjs';
 import { initialize, readState } from '../src/store.mjs';
 import { run } from '../src/cli.mjs';
@@ -58,6 +61,20 @@ test('notice targets the bound Manager and identifies the actual durable submiss
   assert.equal(p.hostActionExecuted, false);
   assert.deepEqual(s, before);
   assert.equal(review(s, p.notice).action, 'review');
+});
+
+test('receive CLI emits structured NOTICE_MISMATCH and exits nonzero without mutation', async t => {
+  const x=await files(t),callerPath=join(x.directory,'caller.json'),noticePath=join(x.directory,'notice.json');
+  await writeFile(callerPath,JSON.stringify(manager));
+  await writeFile(noticePath,JSON.stringify({...prepare(x.s).notice,summary:'damaged'}));
+  const before=await readFile(x.statePath,'utf8');
+  await assert.rejects(promisify(execFile)(process.execPath,[fileURLToPath(new URL('../src/cli.mjs',import.meta.url)),
+    'receive-submission',x.statePath,callerPath,noticePath,'receive',String(x.s.version),at]),error=>{
+      assert.equal(error.code,1);
+      assert.deepEqual(JSON.parse(error.stderr.trim()),{code:'NOTICE_MISMATCH',message:'Notice does not match durable submission'});
+      return true;
+    });
+  assert.equal(await readFile(x.statePath,'utf8'),before);
 });
 
 test('unrelated state changes do not create a second notice for the same submission', () => {
