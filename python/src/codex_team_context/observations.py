@@ -47,7 +47,8 @@ def configure_observations(
     runtime_revision: str | None, registry_mode: bool,
     config_path: str | os.PathLike[str] | None = None,
 ) -> ObservationRecorder | None:
-    configured = root is not None or observed_teams is not None or runtime_revision is not None or config_path is not None
+    # Version diagnostics alone never opt a team into observation collection.
+    configured = root is not None or observed_teams is not None or config_path is not None
     if not configured:
         return None
     if not registry_mode:

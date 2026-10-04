@@ -16,6 +16,7 @@ from .core import ContextError, ContextRegistry, initialize_index
 from .observations import configure_observations, observed_call
 from .team_registry import TeamRegistry, initialize_registry
 from .startup import StartupLedger
+from .runtime_revision import resolve_runtime_revision
 
 
 Reason = Literal[
@@ -80,6 +81,7 @@ def create_server(
             "Use exactly one mode: --registry, or --index with at least one --state-root",
         )
 
+    runtime_revision = resolve_runtime_revision(runtime_root, runtime_revision)
     recorder = configure_observations(
         root=observation_root, observed_teams=observed_teams,
         runtime_revision=runtime_revision, registry_mode=registry_mode,

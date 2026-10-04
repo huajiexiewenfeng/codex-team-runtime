@@ -12,7 +12,15 @@ const statuses = ['queued', 'executing', 'submitted', 'reviewing', 'rework', 'ap
 const transitions = {queued:['executing','cancelled'],executing:['submitted','blocked','cancelled'],submitted:['reviewing','blocked'],reviewing:['rework','approved','blocked'],rework:['submitted','blocked'],approved:[],cancelled:[]};
 const fail = message => { throw new Error(message); };
 const check = (condition, message) => { if (!condition) fail(message); };
-function object(x, keys) { check(x && typeof x === 'object' && !Array.isArray(x), 'Expected object'); check(Object.keys(x).every(k => keys.includes(k)), 'Unknown field'); }
+function object(x, keys, context = '') {
+ check(x && typeof x === 'object' && !Array.isArray(x), 'Expected object');
+ const unknown = Object.keys(x).filter(k => !keys.includes(k));
+ if (unknown.length) {
+  // Show at most three bounded, escaped names; never interpolate their values.
+  const names = unknown.slice(0, 3).map(k => JSON.stringify(k.slice(0, 80)).replace(/[^\x20-\x7e]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`) + (k.length > 80 ? ' (truncated)' : ''));
+  fail(`Unknown field${unknown.length > 1 ? 's' : ''}${context ? ` in ${context}` : ''}: ${names.join(', ')}${unknown.length > 3 ? ' (additional fields omitted)' : ''}`);
+ }
+}
 function text(x) { check(typeof x === 'string' && x.trim().length > 0 && x.length <= 4000, 'Expected nonempty text (max 4000)'); }
 function id(x) { text(x); check(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(x), 'Invalid identifier'); }
 export function validateCaller(x) {
@@ -194,7 +202,7 @@ fields.deliveryClaim=['roundId','taskId','caller','attemptId','summary'];
 fields.cancelUndelivered=['roundId','taskId','caller','attemptId','summary','cancellation'];
 fields.dispatchConflict=['roundId','taskId','caller','attemptId','summary'];
 export function evolve(state,e,expectedVersion,{nowMs=Date.now(),dispatchOperation=false}={}) {
- validate(state); check(!e.source?.ref?.startsWith('e04-op:')||dispatchOperation,'E04 events require dispatch runtime'); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]]); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
+ validate(state); check(!e.source?.ref?.startsWith('e04-op:')||dispatchOperation,'E04 events require dispatch runtime'); check(expectedVersion===state.version,'Version conflict'); check(fields[e.type]!==undefined,'Unknown event'); object(e,['id','type','actor','at','source',...fields[e.type]],`event ${e.type}`); id(e.id); time(e.at); provenance(e.source); check(e.at>=state.updatedAt,'Event time moved backwards'); check(!state.events.some(x=>x.id===e.id),'Duplicate event');
  if(state.schemaVersion===2){check(state.registry.phase==='active','Registry link is prepared; writes are fenced');check(!['bindMember','exitMember','attachInvite','attachConfirm','detachLiaison','registerWorker'].includes(e.type),'Legacy identity event forbidden in linked state');}
  check(Number.isFinite(nowMs),'Invalid host clock');check(Date.parse(e.at)<=nowMs+60000,'Event time exceeds host clock (maximum skew 60 seconds)');
  const s=structuredClone(state), actor=s.members.find(m=>m.id===e.actor); check(actor?.lifecycle==='active'&&(actor.binding.status==='bound'||(e.type==='attachConfirm'&&actor.role==='Liaison'&&actor.binding.status==='unbound')),'Actor unavailable');

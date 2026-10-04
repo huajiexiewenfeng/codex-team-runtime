@@ -57,10 +57,11 @@ def events(root: Path):
 def test_observation_configuration_is_default_off_and_rejects_unsafe_combinations(tmp_path: Path):
     registry = tmp_path / "registry.json"
     assert configure_observations(root=None, observed_teams=None, runtime_revision=None, registry_mode=True) is None
+    assert configure_observations(root=None, observed_teams=None, runtime_revision="runtime-1", registry_mode=True) is None
+    create_server(registry_path=registry, runtime_revision="runtime-1")
     bad = [
         {"observation_root": tmp_path / "out"},
         {"observed_teams": ["team-a"]},
-        {"runtime_revision": "runtime-1"},
         {"observation_root": "relative", "observed_teams": ["team-a"]},
         {"observation_root": tmp_path / "out", "observed_teams": []},
         {"observation_root": tmp_path / "out", "observed_teams": ["bad team"]},

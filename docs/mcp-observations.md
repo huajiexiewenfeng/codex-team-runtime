@@ -82,6 +82,24 @@ startup. Configuration does not create the output directory; the first eligible
 event does. `--runtime-revision` is optional but, when present, is an
 operator-supplied label rather than a value verified from the running process.
 
+Version diagnostics are independent of collection: `--runtime-revision` alone
+does not enable observations or require an output root/allowlist. The explicit
+bounded JSON-safe label takes precedence. Without it, a configured absolute
+`--runtime-root` reads only its parent's `installation.json` (the installed
+`companion` layout). The metadata's absolute `runtimeRoot` must resolve to that
+exact root; no directory search, Git lookup, or global configuration change occurs.
+The `revision` must be a full lowercase 40/64-character hex commit declaration
+and `sourceDirty` must be a boolean. A bounded ASCII `localPatch` label, when
+present, produces `<revision>+<localPatch>`; it does not itself mean dirty.
+`sourceDirty=true` appends `+dirty`, explicitly retaining unknown local changes.
+Missing, unreadable, oversized (over 64 KiB), malformed or mismatched metadata,
+invalid fields or unknown dirty status leave the revision unknown (`unversioned`
+in E03/E04 responses, null in observation events). Resolution happens once at
+server startup and supplies the same label to E03, E04 and configured observations.
+Their `runtimeRevisionSource` remains `operator-declared`: neither installation
+metadata nor an explicit label authenticates the running files, a patch digest,
+permissions or compatibility. Restart the server to pick up metadata changes.
+
 ## Identity and reason boundaries
 
 The server projects identity using the caller-supplied `host_id`/`thread_id` (or
