@@ -1,0 +1,10 @@
+import {validate} from './runtime.mjs';
+const fail=message=>{throw Object.assign(new Error(message),{code:'INVALID_WORK_CONTEXT'});},check=(v,m)=>{if(!v)fail(m);};
+const id=v=>typeof v==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(v);
+export function validateObservationContext(state,caller,context,{now=new Date().toISOString()}={}){
+  validate(state);check(context&&typeof context==='object'&&!Array.isArray(context),'Context must be an object');const keys=context.scope==='team'?['scope','team_id']:context.scope==='task'?['scope','team_id','round_id','task_id','step_id']:[];check(keys.length&&Object.keys(context).length===keys.length&&keys.every(k=>Object.hasOwn(context,k)),'Invalid context schema');
+  for(const key of keys.filter(k=>k!=='scope'))check(id(context[key]),'Invalid context identifier');check(context.team_id===state.team.id,'Context team mismatch');check(state.updatedAt<=now,'Future state unavailable');
+  const member=state.members.find(m=>m.lifecycle==='active'&&m.binding.status==='bound'&&m.binding.hostId===caller.hostId&&m.binding.threadId===caller.threadId);check(member,'Context caller is not an active team member');if(state.schemaVersion===2)check(state.registry.phase==='active'&&state.registry.readyMemberIds.includes(member.id),'Context caller is not ready');
+  if(context.scope==='task'){const task=state.tasks.find(t=>t.id===context.task_id);check(task&&task.roundId===context.round_id&&state.rounds.some(r=>r.id===context.round_id),'Task/round context mismatch');check(member.role!=='Worker'||task.workerId===member.id,'Worker task context mismatch');}
+  return {scope:context.scope,teamId:context.team_id,...(context.scope==='task'?{roundId:context.round_id,taskId:context.task_id,stepId:context.step_id}:{}),associationSource:'caller-declared',validation:{basis:'recorded-state-scope',sourceVersion:state.version,stateAsOf:state.updatedAt,validatedAt:now,memberId:member.id,role:member.role,hostId:member.binding.hostId,threadId:member.binding.threadId}};
+}

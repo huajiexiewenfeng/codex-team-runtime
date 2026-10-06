@@ -3,6 +3,14 @@ import {validate} from './runtime.mjs';
 // Recorded business history only. Never projects or refreshes the live Registry.
 export function buildStateTimeline(state,{teamId,roundId,taskId}) {
   validate(state);
+  return projectStateTimeline(state,{teamId,roundId,taskId});
+}
+
+export function buildStateTimelines(state,teamId) {
+  validate(state);
+  return state.tasks.map(task=>projectStateTimeline(state,{teamId,roundId:task.roundId,taskId:task.id}));
+}
+function projectStateTimeline(state,{teamId,roundId,taskId}) {
   if(state.team.id!==teamId)throw new Error('Timeline state team mismatch');
   const round=state.rounds.find(r=>r.id===roundId);
   const task=state.tasks.find(t=>t.id===taskId&&t.roundId===roundId);

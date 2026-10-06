@@ -3,7 +3,55 @@
 Use for either team Dashboard, its identity, freshness or a stale existing page.
 Plain status/history reads do not start a service.
 
-## One team entry, two named tabs
+## Explicit task and step recording
+
+When authorized step-duration recording is requested, follow
+`<runtime-root>/docs/task-attribution.md`. Use the existing explicitly approved
+activity source and `stats-activity-begin` / `stats-activity-end` receipt commands;
+these record worker/operator-declared activity, separately from machine MCP call
+timing. Do not manufacture old begin/end events, use a task owner as a step owner,
+or promise automatic tracing of every Agent tool. Missing end remains unknown.
+
+Only on an already-needed role-recovery `team_context.read`, and only after tool
+discovery advertises it, an explicit known `work_context` may label the team or
+task/round/step. This remains caller-declared correlation checked against the
+recorded scope, not authentication or work authorization. Do not add a read for
+each tool or step to create telemetry; activity begin/end is the actual step path.
+No-context read remains valid. Team work stays shared; missing Worker task links
+remain unassigned. Keep the active work's original Manager ownership and grants.
+
+The attribution-capable reader supports strict event v1/v2 and stats cache v3.
+Use a new owned cache when upgrading; old caches/leases fail explicitly rather
+than mixing old projections. Installed Python files do not reload an existing
+MCP connection. The connection owner may reconnect when the optional schema is
+needed; do not kill other services, restart Codex, or edit Registry/config.
+
+## One team entry, explicitly bound v2 views
+
+For an installed runtime supporting v2, use `dashboard-serve <authoritative-state.json>
+--team <verified-team-id> --source-manifest <approved-manifest.json>
+--stats-cache <owned-cache-directory> --port 0`. The three binding options belong
+together. Verify the manifest's exact same-team sources and scope; a team ID alone
+does not bind metrics or authorize scanning raw sessions. Read
+`<runtime-root>/docs/dashboard-ui-v2.md` and `docs/dashboard-stats.md` for the v2 contract.
+
+| User-facing view | Intent and evidence |
+| --- | --- |
+| 团队总览 | Current roster/status separately from selected historical member/window metrics |
+| 任务进度 | Search/filter/sort, 20/50 rows, frozen task/stage pagination and acceptance |
+| 指标统计：任务耗时 / Token / MCP | Windowed task/day/member/step details, independent source/assurance and coverage |
+
+For a bare “dashboard/看板”, hand off this one verified entry and explain its available
+views. Preserve base/query snapshot identity when paging or drilling into a day/member;
+refresh starts a new base rather than silently mixing old and new detail. Missing
+durations, native MCP, unassigned attribution and sourcesPending stay unknown.
+Historical native coverage is not a current complete seven-day claim. Keep stateAsOf
+and each statistics sourceAsOf separate in the handoff.
+
+Without explicit v2 source-manifest/cache bindings, preserve the legacy entry below;
+do not silently connect an unbound team to global logs or substitute an old HTML file.
+
+## Legacy v1 fallback: two named tabs
 
 | User-facing name | Intent and evidence | Entry |
 | --- | --- | --- |
@@ -38,7 +86,7 @@ For Work service CLI, credentials, Python projection and shutdown details read
 
 ## Choose the surface
 
-- For the unified workbench, use `node <runtime-root>/src/cli.mjs dashboard-serve <authoritative-state.json> [--port <0..65535>] [--codex-links] [--metrics-report <verified-report.json>]`. Bind only an explicitly verified same-team daily report, not a Token-only HTML. Reuse a verified existing service for the exact same team/state/report when available. Resolve the trusted Runtime and schema-2 Python using the Skill's normal locators; check this installed version actually supports the command. An old companion may still support only static exports; disclose that, do not fabricate a working unified link or install implicitly. Changing the report binding needs a new Dashboard service, not a Codex restart; verify ownership before replacing any process.
+- For the unified workbench, use the v2 command above when all bindings are verified. Otherwise use the legacy `node <runtime-root>/src/cli.mjs dashboard-serve <authoritative-state.json> [--port <0..65535>] [--codex-links] [--metrics-report <verified-report.json>]`. Bind only an explicitly verified same-team daily report, not a Token-only HTML. Reuse a verified existing service for the exact same team/state/source bindings when available. Resolve the trusted Runtime and schema-2 Python using the Skill's normal locators; check this installed version actually supports the command. An old companion may still support only static exports; disclose that, do not fabricate a working unified link or install implicitly. Changing source bindings needs a new Dashboard service, not a Codex restart; verify ownership before replacing any process.
 - For an explicit offline file, archive or audit snapshot, use `dashboard` (all rounds) or `snapshot` / `render` (one view), always to a new directory. Preserve old exports and their READY manifest; do not overwrite or silently convert old file URLs.
 - A request to view the workbench authorizes its local read-only presentation, not new members, messages, business state mutations, public hosting, global installation or Agent timers. Native host and process permissions still apply.
 
@@ -50,7 +98,17 @@ The deterministic service reads Node state plus current Registry projection. A R
 
 ## Lifecycle and handoff
 
-The visible Work tab requests records every five seconds after the preceding request completes. Hidden, paused or closed pages and switching to Metrics stop Work requests. Metrics reads its bound report when selected or explicitly refreshed; it never collects or regenerates statistics. No Agent is polled/woken, no heartbeat/automation is created, and the service does not scan while idle. This browser display loop is not the Skill's Agent timer route. Do not set a 24-hour Agent timer to maintain HTML.
+The visible v2 page reads current state every five seconds and requests bounded
+incremental statistics from its fixed manifest every thirty seconds; pause/pagehide
+stop its loop. Historical/paged details retain their frozen base until refresh.
+The hidden/abort contract is covered by product tests, but a host that cannot produce
+actual document.hidden must retain that real-browser validation gap.
+In legacy v1, the visible Work tab requests records every five seconds after the
+preceding request completes; hidden/paused/closed pages or switching to Metrics stop
+Work requests. Legacy Metrics reads its bound report on demand and never regenerates
+it. Neither mode polls/wakes Agents, creates heartbeat/automation, or scans while
+idle. This browser display loop is not the Skill's Agent timer route. Do not set a
+24-hour Agent timer to maintain HTML.
 
 Keep the known process/terminal identity and original full launcher link with its state/runtime mapping in the working handoff, not Git or public artifacts. Use the same running entry; a new process has a new credential. Only stop the verified process that belongs to this view, never another task or all Node processes. Ctrl+C ends the foreground service; a host that cannot keep the process alive must be reported honestly, with static export offered as fallback.
 

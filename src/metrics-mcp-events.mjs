@@ -19,7 +19,8 @@ const safeCount = (value, label, minimum = 0) => check(Number.isSafeInteger(valu
 
 function validateEvent(event, scope) {
   const extension=Object.hasOwn(event,'dispatch')?'dispatch':Object.hasOwn(event,'notice')?'notice':null;
-  exact(event, extension?[...fields,extension]:fields, 'MCP event');
+  check([1,2].includes(event.schemaVersion),'Invalid MCP event schemaVersion');
+  exact(event, [...fields,...(extension?[extension]:[]),...(event.schemaVersion===2?['workContext']:[])], 'MCP event');
   if(extension){
     check(event.tool===`team_context.${extension}`||event.tool===`team_context.${extension}_status`,`Invalid ${extension} observation tool`);
     const detail=event[extension],allowed=['action','taskId','submissionId','operationId','attemptId','reasonCode','sourceVersion','ledgerVersion','requestBytes','responseBytes'];
@@ -30,7 +31,7 @@ function validateEvent(event, scope) {
     }
     check(['prepare','result','status',...(extension==='dispatch'?['cancel']:[])].includes(detail.action),'Invalid action');
   }
-  check(event.schemaVersion === 1, 'Invalid MCP event schemaVersion');
+  if(event.schemaVersion===2){const context=event.workContext;check(isObject(context)&&['team','task'].includes(context.scope),'Invalid work context scope');exact(context,['scope','teamId','associationSource','validation',...(context.scope==='task'?['roundId','taskId','stepId']:[])],'work context');identifier(context.teamId,'context.teamId');check(context.teamId===event.teamId,'Work context team mismatch');check(context.associationSource==='caller-declared','Invalid context association source');if(context.scope==='task')for(const key of ['roundId','taskId','stepId'])identifier(context[key],key);if(extension&&event[extension].taskId)check(context.scope==='task'&&context.taskId===event[extension].taskId,'Work context conflicts with runtime request');const proof=context.validation;exact(proof,['basis','sourceVersion','stateAsOf','validatedAt','memberId','role','hostId','threadId'],'work context validation');check(['memberId','role','hostId','threadId'].every(k=>proof[k]===event[k]),'Work context identity mismatch');check(proof.basis==='recorded-state-scope','Invalid context validation basis');safeCount(proof.sourceVersion,'sourceVersion');timestamp(proof.stateAsOf,'stateAsOf');timestamp(proof.validatedAt,'validatedAt');check(proof.stateAsOf<=proof.validatedAt&&proof.validatedAt<=event.completedAt,'Invalid context validation time');}
   check(typeof event.eventId === 'string' && uuidPattern.test(event.eventId), 'Invalid eventId');
   timestamp(event.startedAt, 'startedAt'); timestamp(event.completedAt, 'completedAt');
   safeCount(event.durationMs, 'durationMs'); safeCount(event.policyRevision, 'policyRevision', 1);
@@ -62,6 +63,13 @@ function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (isObject(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
   return JSON.stringify(value);
+}
+
+// Same closed event contract for the independent incremental collector.
+export function validateServerMcpEvent(event, scope) {
+  validateEvent(event, scope);
+  check(event.completedAt >= event.startedAt, 'Invalid MCP interval');
+  return event;
 }
 
 function zeroes(values) { return Object.fromEntries(values.map(value => [value, 0])); }

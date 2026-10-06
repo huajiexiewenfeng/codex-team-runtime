@@ -18,6 +18,10 @@ Skill-driven team coordination for Codex
 
 [RSI 设计](docs/design/team-rsi.md) · [任务时间线](docs/design/task-timeline.md) · [单变量优化台账](docs/optimization/team-flow-experiments.md)
 
+Dashboard U1 数据层新增 `stats-refresh` / `stats-query` 与独立 activity sidecar：显式来源、
+有界增量缓存、binding epoch、分来源耗时并集及固定快照分页。旧工作台尚未接入这些查询；
+真实完整成员工作时长仍依赖可核验输入。见 [统计采集与查询](docs/dashboard-stats.md)。
+
 ## 当前状态
 
 **2026-09-10 架构基线：核心协议已实现，进入真实使用与渐进验证。** 本文包含已在本地安装、尚未全部提交发布的 Registry cutover 增量；不能将架构图或文档提交视为同版本代码已经发布。具体接口以所用 checkout / companion 版本为准。
@@ -218,3 +222,5 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 ## License
 
 [MIT](LICENSE)
+
+单团队正式三视图及固定来源启动方式见 [Dashboard v2](docs/dashboard-ui-v2.md)。

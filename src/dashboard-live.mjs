@@ -11,6 +11,8 @@ import {readDashboardMetrics} from './dashboard-metrics.mjs';
 import {readDashboardTimelines,timelineStyles} from './dashboard-timeline.mjs';
 import {readIndexedTimeline} from './dashboard-timeline-index.mjs';
 import {loadDashboardTimelineReport} from './dashboard-timeline.mjs';
+import {createDashboardQueries,parseDashboardQuery,sanitizeDashboardResponse} from './dashboard-query.mjs';
+import {dashboardV2Shell} from './dashboard-v2-shell.mjs';
 
 const shell=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Team Runtime · 最新工作台</title><link rel="stylesheet" href="/dashboard.css"><script type="module" src="/dashboard-client.mjs"></script></head><body>
 <header class="portal-header"><div class="brand"><span class="brand-mark" aria-hidden="true">tr</span>codex team runtime <span class="pill neutral">只读团队工作台</span></div><span id="portal-team" class="mono">等待团队连接</span></header>
@@ -70,7 +72,7 @@ const securityHeaders={
 };
 
 // Dependencies are programmatic test seams, never accepted through HTTP or request JSON.
-export async function startDashboardServer({statePath,metricsReportPath=null,timelineReportPath=null,timelineIndexPath=null,port=4319,codexLinks=false,read=readState,now=Date.now,cacheMs=1000}={}) {
+export async function startDashboardServer({statePath,teamId:configuredTeamId=null,sourceManifestPath=null,statsCachePath=null,metricsReportPath=null,timelineReportPath=null,timelineIndexPath=null,port=4319,codexLinks=false,read=readState,now=Date.now,cacheMs=1000}={}) {
  if(typeof statePath!=='string'||!statePath.trim())throw new Error('dashboard-serve requires a state path');
  if(metricsReportPath!==null&&(typeof metricsReportPath!=='string'||!metricsReportPath.trim()))throw new Error('Invalid metrics report path');
  const metricsPath=metricsReportPath===null?null:resolve(metricsReportPath);
@@ -82,6 +84,10 @@ export async function startDashboardServer({statePath,metricsReportPath=null,tim
  if(!Number.isInteger(port)||port<0||port>65535)throw new Error('Invalid dashboard port');
  if(typeof codexLinks!=='boolean'||!Number.isFinite(cacheMs)||cacheMs<0||cacheMs>1000)throw new Error('Invalid dashboard options');
  const path=resolve(statePath),token=randomBytes(32).toString('hex'),credential=Buffer.from(`Bearer ${token}`);
+ const v2=sourceManifestPath!==null||statsCachePath!==null||configuredTeamId!==null;
+ if(v2&&(typeof configuredTeamId!=='string'||!configuredTeamId.trim()||typeof sourceManifestPath!=='string'||!sourceManifestPath.trim()||typeof statsCachePath!=='string'||!statsCachePath.trim()))throw new Error('v2 requires fixed team, source manifest and stats cache');
+ const v2Client=v2?await readFile(new URL('./dashboard-v2-client.mjs',import.meta.url),'utf8'):null;
+ const v2Styles=v2?await readFile(new URL('./dashboard-v2.css',import.meta.url),'utf8'):null;
  const client=await readFile(new URL('./dashboard-client.mjs',import.meta.url),'utf8');
  const tabsClient=await readFile(new URL('./metrics-daily-tabs.mjs',import.meta.url),'utf8');
  let origin,host,cached,readAt=0,inflight=null,teamId=null,closed=false;
@@ -95,6 +101,7 @@ export async function startDashboardServer({statePath,metricsReportPath=null,tim
   })().catch(error=>{cached=null;throw error;}).finally(()=>{inflight=null;});
   return inflight;
  };
+ const queries=v2?createDashboardQueries({teamId:configuredTeamId,current,manifestPath:resolve(sourceManifestPath),cache:resolve(statsCachePath),now}):null;
  const server=createServer(async(req,res)=>{
   const send=(status,body='',type='application/json; charset=utf-8',extra={})=>{
    if(res.destroyed)return;
@@ -107,6 +114,14 @@ export async function startDashboardServer({statePath,metricsReportPath=null,tim
   // Refuse absolute-form targets and ambiguous query parameters; there is no file browser.
   if(!req.url?.startsWith('/')||req.url.startsWith('//'))return error(400,'invalid_target');
   let url;try{url=new URL(req.url,origin);}catch{return error(400,'invalid_target');}
+  if(url.pathname.startsWith('/api/v2/')){
+   const supplied=Buffer.from(req.headers.authorization??'');
+   if(supplied.length!==credential.length||!timingSafeEqual(supplied,credential))return error(401,'credential_required');
+   if(req.headers['sec-fetch-site']&&!['same-origin','none'].includes(req.headers['sec-fetch-site']))return error(403,'foreign_site');
+   const endpoint=url.pathname.slice('/api/v2/'.length);if(!queries||!['snapshot','overview','tasks','task','metrics','timeline','locate','coverage'].includes(endpoint))return error(404,'not_found');
+   try{const result=await queries.handle(endpoint,parseDashboardQuery(url.searchParams)),body=JSON.stringify(sanitizeDashboardResponse(result));if(Buffer.byteLength(body)>1024*1024)return error(429,'bounded_budget_busy');return send(200,body);}
+   catch(e){const code=e.code??'source_unavailable';const status=code==='credential_required'?401:code==='scope_denied'?403:code==='target_not_found'?404:code==='snapshot_expired'?409:code==='bounded_budget_busy'||code.endsWith('_limit')||code.endsWith('_budget')?429:code==='invalid_query'||code==='snapshot_query_mismatch'?400:503;return error(status,status===503?'source_unavailable':code);}
+  }
   if(['/api/view','/api/metrics','/api/timeline'].includes(url.pathname)) {
    if(req.headers['sec-fetch-site']&&!['same-origin','none'].includes(req.headers['sec-fetch-site']))return error(403,'foreign_site');
    const supplied=Buffer.from(req.headers.authorization??'');
@@ -148,8 +163,11 @@ export async function startDashboardServer({statePath,metricsReportPath=null,tim
     return send(200,JSON.stringify({teamId:state.team.id,snapshotId:view.snapshotId,sourceVersion:view.sourceVersion,registryRevision:view.registry?.teamRevision??null,asOf:view.asOf,checkedAt,roundId,rounds:state.rounds.map(({id,title,status})=>({id,title,status})),html:render(view,{live:true,embedded:true,codexLinks})}),undefined,headers);
    }catch{return error(503,'source_unavailable');}
   }
+  if(v2&&['/','/index.html','/tasks.html','/metrics.html'].includes(url.pathname))return send(200,dashboardV2Shell,'text/html; charset=utf-8');
   if(url.search)return error(400,'invalid_query');
   if(url.pathname==='/')return send(200,shell,'text/html; charset=utf-8');
+  if(v2&&url.pathname==='/dashboard-v2-client.mjs')return send(200,v2Client,'text/javascript; charset=utf-8');
+  if(v2&&url.pathname==='/dashboard-v2.css')return send(200,v2Styles,'text/css; charset=utf-8');
   if(url.pathname==='/dashboard.css')return send(200,styles,'text/css; charset=utf-8');
   if(url.pathname==='/dashboard-client.mjs')return send(200,client,'text/javascript; charset=utf-8');
   if(url.pathname==='/metrics-daily-tabs.mjs')return send(200,tabsClient,'text/javascript; charset=utf-8');
@@ -164,6 +182,7 @@ export async function startDashboardServer({statePath,metricsReportPath=null,tim
  host=`127.0.0.1:${server.address().port}`;origin=`http://${host}`;
  return {origin,url:`${origin}/#token=${token}`,close:async()=>{
   if(closed)return;closed=true;
+  queries?.close();
   const finished=new Promise((resolveClosed,reject)=>server.close(error=>error?reject(error):resolveClosed()));
   server.closeAllConnections();await finished;
  }};

@@ -1,4 +1,5 @@
 // Read-only observations. No business state, role registry or workflow mutations.
+import {projectNativeTiming} from './native-tool-timing.mjs';
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) ? value : null;
 const time = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 const delta = (a,b) => a && b && Date.parse(b)>=Date.parse(a) ? Date.parse(b)-Date.parse(a) : null;
@@ -57,11 +58,8 @@ export function createTimelineParser(input) {
       const header=blocks[0]??'';
       if(blocks.length===1)try{
         const native=JSON.parse(header);
-        if(id(native?.chunk_id)&&typeof native.wall_time_seconds==='number'&&Number.isFinite(native.wall_time_seconds)&&native.wall_time_seconds>=0){
-          const sessionId=Number.isSafeInteger(native.session_id)&&native.session_id>=0?native.session_id:null;
-          const exitCode=Number.isSafeInteger(native.exit_code)?native.exit_code:null;
-          if(sessionId!==null||exitCode!==null)event.nativeProcess={sessionId,exitCode};
-        }
+        const timing=projectNativeTiming(native);
+        if(timing.kind==='process')event.nativeProcess={sessionId:timing.sessionId,exitCode:timing.exitCode};
       }catch{/* Script bodies and nested results are not native call envelopes. */}
       const yielded=/^Script running with cell ID ([a-zA-Z0-9_-]+)\r?\nWall time [\d.]+ seconds\r?\nOutput:\r?\n/.exec(header);
       if(yielded)event.cellId=yielded[1];

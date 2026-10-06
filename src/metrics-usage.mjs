@@ -167,12 +167,20 @@ function hasGap(before, after, last) {
 }
 const completeUsage = value => value !== null && usageFields.every(field => value[field] !== null);
 
-export function createCodexUsageAccumulator(options, observer = null) {
+export function createCodexUsageAccumulator(options, observer = null, resume = null) {
   object(options, ['hostId', 'threadId', 'sourceRef']);
   identifier(options.hostId, 'hostId'); identifier(options.threadId, 'threadId'); text(options.sourceRef, 'sourceRef');
   const records = [], diagnostics = [];
   let sessionSeen = false, turnId = null, model = null, previousCumulative = null;
   let lineNumber = 0, sawContent = false, finished = false;
+  if (resume !== null) {
+    object(resume, ['sessionSeen','turnId','model','previousCumulative','lineNumber','sawContent']);
+    check(typeof resume.sessionSeen === 'boolean' && typeof resume.sawContent === 'boolean', 'Invalid usage checkpoint');
+    numberOrNull(resume.lineNumber, 'checkpoint lineNumber'); check(resume.lineNumber !== null, 'Invalid checkpoint lineNumber');
+    for (const key of ['turnId','model']) check(resume[key] === null || (typeof resume[key] === 'string' && resume[key].length <= 4000), 'Invalid usage checkpoint metadata');
+    if (resume.previousCumulative !== null) validateUsageValues(resume.previousCumulative);
+    ({sessionSeen,turnId,model,previousCumulative,lineNumber,sawContent} = structuredClone(resume));
+  }
   function push(line) {
     check(!finished, 'Parser is already finished'); check(typeof line === 'string', 'Expected JSONL line');
     lineNumber += 1;
@@ -239,7 +247,11 @@ export function createCodexUsageAccumulator(options, observer = null) {
     if (!sessionSeen && sawContent) diagnostics.push(diagnostic('missing_session_meta', 'warning', options.sourceRef, null, null, 'No session identity record was observed'));
     return { records, diagnostics };
   }
-  return { push, finish };
+  // Independent statistics checkpoints contain only identity/counter metadata.
+  // Existing ledger schemas and the default one-shot parser remain unchanged.
+  const checkpoint = () => structuredClone({sessionSeen,turnId,model,previousCumulative,lineNumber,sawContent});
+  const drain = () => ({records: records.splice(0), diagnostics: diagnostics.splice(0)});
+  return { push, finish, checkpoint, drain };
 }
 
 export function parseCodexUsageDetailed(textValue, options, observer = null) {

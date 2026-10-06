@@ -47,11 +47,14 @@ Only Manager maintains the registry, after externally verified bootstrap/member 
 
 ## Intent routing
 
-Use one **团队工作台 (Team Dashboard)** entry with **任务进度** for tasks, members,
-blockers and acceptance, and **指标统计** for daily Token usage and MCP observations.
+Use one **团队工作台 (Team Dashboard)** entry. With an explicitly verified same-team
+source manifest and stats cache, the v2 entry provides **团队总览 / 任务进度 / 指标统计**;
+metrics offers **任务耗时 / Token / MCP** with scoped windows and frozen pagination.
 Read [Dashboard routing](references/dashboard.md) before handing off the entry.
 A bare “dashboard/看板” opens this unified entry, not the last HTML file. Explain
-the two tabs; missing Metrics input is unbound, never zero or a substitute Token audit.
+the available views and source coverage. Without v2 bindings, retain the legacy
+Work/Metrics two-tab entry; missing Metrics input is unbound, never zero or a
+substitute Token audit. A team binding does not authorize global raw-log scanning.
 
 Timers are OFF by default. Role activation, new work, "continue", and Worker completion do not authorize creating or resuming a timer. Use completion/blocker messages and user-triggered checks without a polling loop. An explicitly requested timer requires a human-confirmed fixed window of at most 24 hours; renewal requires fresh human confirmation. Before enabling one, read [timer authorization and expiry](references/operations.md#timer-authorization-and-expiry). This policy does not stop Workers or exit roles.
 
@@ -77,7 +80,7 @@ For an explicitly requested correction of a confirmed **unlinked legacy** Liaiso
 
 - **Status/history and Liaison:** read snapshots only. Liaison explains evidence and discusses decisions with the user; it does not command Workers or write Manager state. A durable command inbox is not implemented.
 - **Explicit activation, pairing, role recovery, Worker registration, supervision, acceptance or exit:** read [references/operations.md](references/operations.md) and the selected runtime's `docs/runtime-usage.md`. Unlinked legacy `start` creates local role records only; Manager invites and the target Liaison confirms from its own context using `attach`. Linked membership uses MCP, not these identity commands. Legacy `resume` returns guidance without mutation; linked recall uses the shared team-context contract. Missing dependencies or unverifiable current identity stop identity-dependent operations, not ordinary status reads.
-- **团队工作台 / 任务进度 / 指标统计 / stale Dashboard:** follow [Dashboard routing and ownership](references/dashboard.md). `dashboard-serve` is one entry with two tabs; bind a verified same-team daily report using `--metrics-report`. Work auto-sync does not refresh or collect Metrics. Plain status queries do not start services. Manager/Workers maintain authorized records; Liaison explains the view without writing Manager state.
+- **团队工作台 / 任务进度 / 指标统计 / stale Dashboard:** follow [Dashboard routing and ownership](references/dashboard.md). For verified v2 bindings, start `dashboard-serve` with `--team`, `--source-manifest` and `--stats-cache`; the unified entry has overview/tasks and time/Token/MCP metrics. Unbound teams retain the legacy two-tab service with optional same-team `--metrics-report`; its Work auto-sync does not collect Metrics. Plain status queries do not start services. Manager/Workers maintain authorized records; Liaison explains the view without writing Manager state.
 - **Manager supervision pass:** use `supervision-plan` in operations.md to inspect durable `taskChecks` and `pendingSubmissions` as well as bounded native observations. No message or an empty host result is not a reason to skip existing review work. A generated plan is not an executed query or automatic acceptance.
 - **Worker stage completion / submission / Manager receipt:** follow [completion notification](references/completion-notification.md): save evidence, proactively notify the exact Manager, then independent pass/rework. Carry existing user authorization and native target evidence in handoffs, without repeated approval for unchanged grants; Registry readiness is not host authentication. Formal submissions use `submission-notice` / `receive-submission`; non-submit stages/blockers are labelled separately. Preparation, submission, delivery, receipt and acceptance are separate facts. Old workarounds do not authorize permanent silence; new notice IDs do not clear a denial of the same disclosure. Host reconsideration is separate and cannot be guaranteed by this Skill.
 - **Reporting coordination records:** read the companion checkout's `docs/reporting-usage.md` for `reporting-init`, `reporting-plan` and `reporting-apply`. These manage a local operation ledger only; they do not create or stop automation. Uncertain outcomes require reconciliation, not repeated creation.

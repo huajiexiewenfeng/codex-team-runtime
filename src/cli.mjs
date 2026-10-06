@@ -151,6 +151,26 @@ export async function run(args,output=console.log) {
    await exportTaskEvaluation(resolve(a[0]),resolve(a[1]));
    output(`Read-only evaluation candidates: ${resolve(a[1],'evaluation.md')}`);break;
   }
+  case 'stats-refresh': {
+   if(a.length<2||a.length>3)throw new Error('stats-refresh <verified-manifest.json> <dedicated-cache-directory> [asOf]');
+   const {refreshStats}=await import('./stats-collector.mjs');output(JSON.stringify(await refreshStats(resolve(a[0]),resolve(a[1]),a[2]?{asOf:a[2]}:{}),null,2));break;
+  }
+  case 'stats-query': {
+   if(a.length!==2)throw new Error('stats-query <cache-directory> <query.json>');
+   const {queryStats}=await import('./stats-query.mjs');output(JSON.stringify(await queryStats(resolve(a[0]),await json(a[1])),null,2));break;
+  }
+  case 'stats-activity-begin': {
+   if(a.length!==4)throw new Error('stats-activity-begin <verified-manifest.json> <sourceId> <explicit-context.json> <new-receipt.json>');
+   const {beginActivity}=await import('./stats-activity.mjs');output(JSON.stringify(await beginActivity(a[0],a[1],await json(a[2]),a[3]),null,2));break;
+  }
+  case 'stats-activity-end': {
+   if(a.length!==2)throw new Error('stats-activity-end <verified-manifest.json> <receipt.json>');
+   const {endActivity}=await import('./stats-activity.mjs');output(JSON.stringify(await endActivity(a[0],a[1]),null,2));break;
+  }
+  case 'stats-activity': {
+   if(a.length!==3)throw new Error('stats-activity <verified-manifest.json> <sourceId> <activity-event.json>');
+   const {recordActivity}=await import('./stats-activity.mjs');output(JSON.stringify(await recordActivity(a[0],a[1],await json(a[2])),null,2));break;
+  }
   case 'metrics-import': {
    if(a.length!==3)throw new Error('metrics-import <ledger.json> <source.json> <new-ledger.json>');
    const {validateUsage,mergeUsage}=await import('./metrics-usage.mjs');
@@ -195,11 +215,14 @@ export async function run(args,output=console.log) {
    output(`Read-only dashboard v${manifest.sourceVersion}: ${resolve(a[1],'index.html')} (${manifest.pages.length} pages)`);break;
   }
   case 'dashboard-serve': {
-   const usage='dashboard-serve <state.json> [--port <0..65535>] [--codex-links] [--metrics-report <report.json>] [--timeline-report <report.json> | --timeline-index <index.json>]';
+   const usage='dashboard-serve <state.json> [--port <0..65535>] [--team <team-id> --source-manifest <manifest.json> --stats-cache <cache-directory>] [--codex-links] [--metrics-report <report.json>] [--timeline-report <report.json> | --timeline-index <index.json>]';
    if(!a[0]||a[0].startsWith('--'))throw new Error(usage);
-   let port=4319,codexLinks=false,seenPort=false,metricsReportPath=null,timelineReportPath=null,timelineIndexPath=null;
+   let port=4319,codexLinks=false,seenPort=false,metricsReportPath=null,timelineReportPath=null,timelineIndexPath=null,teamId=null,sourceManifestPath=null,statsCachePath=null;
    for(let i=1;i<a.length;i++){
     if(a[i]==='--codex-links'&&!codexLinks){codexLinks=true;continue;}
+    if(a[i]==='--team'&&teamId===null&&a[i+1]&&!a[i+1].startsWith('--')){teamId=a[++i];continue;}
+    if(a[i]==='--source-manifest'&&sourceManifestPath===null&&a[i+1]&&!a[i+1].startsWith('--')){sourceManifestPath=a[++i];continue;}
+    if(a[i]==='--stats-cache'&&statsCachePath===null&&a[i+1]&&!a[i+1].startsWith('--')){statsCachePath=a[++i];continue;}
     if(a[i]==='--metrics-report'&&metricsReportPath===null&&a[i+1]&&!a[i+1].startsWith('--')){metricsReportPath=a[++i];continue;}
     if(a[i]==='--timeline-report'&&a[i+1]&&!a[i+1].startsWith('--')){timelineReportPath??=[];timelineReportPath.push(a[++i]);continue;}
     if(a[i]==='--timeline-index'&&timelineIndexPath===null&&a[i+1]&&!a[i+1].startsWith('--')){timelineIndexPath=a[++i];continue;}
@@ -207,8 +230,8 @@ export async function run(args,output=console.log) {
     throw new Error(usage);
    }
    const {startDashboardServer}=await import('./dashboard-live.mjs');
-   const service=await startDashboardServer({statePath:a[0],port,codexLinks,metricsReportPath,timelineReportPath,timelineIndexPath});
-   output(`Read-only Team Dashboard · 任务进度 / 指标统计: ${service.url}\nVisible work tab checks every 5 seconds; metrics reads a bound report on demand, without collection. No Agent wakeups. Ctrl+C stops this local service.`);
+   const service=await startDashboardServer({statePath:a[0],port,codexLinks,metricsReportPath,timelineReportPath,timelineIndexPath,teamId,sourceManifestPath,statsCachePath});
+   output(`Read-only Team Dashboard · ${teamId?'团队总览 / 任务进度 / 指标统计':'任务进度 / 指标统计'}: ${service.url}\n${teamId?'Visible page requests state every 5 seconds and bounded incremental statistics every 30 seconds.':'Visible work tab checks every 5 seconds; metrics reads a bound report on demand, without collection.'} No Agent wakeups. Ctrl+C stops this local service.`);
    return service;
   }
   case 'snapshot': case 'render': { if(a.length<2||a.length>4) throw new Error('snapshot|render <state.json> <new-output-directory> [asOf] [roundId]'); const v=await exportView(await readState(a[0]),resolve(a[1]),a[2]??now(),a[3]??null); output(`Read-only snapshot ${v.snapshotId}: ${resolve(a[1])}`); break; }

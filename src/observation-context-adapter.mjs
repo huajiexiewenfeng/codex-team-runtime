@@ -1,0 +1,6 @@
+import {pathToFileURL} from 'node:url';
+import {readState} from './store.mjs';
+import {parseNoticeJson} from './notice-json.mjs';
+import {validateObservationContext} from './observation-context.mjs';
+export async function main(){let size=0,parts=[];for await(const chunk of process.stdin){size+=chunk.length;if(size>65536)throw Error('Context envelope too large');parts.push(chunk);}const e=parseNoticeJson(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(parts))),keys=['statePath','registryPath','request','runtimeRevision','executionToken'];if(!e||Object.keys(e).length!==keys.length||!keys.every(k=>Object.hasOwn(e,k)))throw Error('Invalid envelope');const state=await readState(e.statePath);if(state.schemaVersion!==2||state.registry.registryPath!==e.registryPath)throw Error('Context runtime mismatch');const context=validateObservationContext(state,{hostId:e.request.actor_host_id,threadId:e.request.actor_thread_id},e.request.work_context);process.stdout.write(JSON.stringify({status:'validated',readOnly:true,hostActionExecuted:false,workContext:context})+'\n');}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(e=>{process.stdout.write(JSON.stringify({status:'error',reasonCode:e.code??'INVALID_WORK_CONTEXT',message:'Work context could not be validated',readOnly:true,hostActionExecuted:false})+'\n');});

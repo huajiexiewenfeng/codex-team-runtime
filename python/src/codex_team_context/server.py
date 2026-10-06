@@ -17,6 +17,7 @@ from .observations import configure_observations, observed_call
 from .team_registry import TeamRegistry, initialize_registry
 from .startup import StartupLedger
 from .runtime_revision import resolve_runtime_revision
+from .work_context import TeamWorkContext,TaskWorkContext
 
 
 Reason = Literal[
@@ -109,18 +110,35 @@ def create_server(
             openWorldHint=False,
         ),
     )
-    def read(host_id: str, thread_id: str, reason: Reason = "unknown") -> CallToolResult:
+    def read(host_id: str, thread_id: str, reason: Reason = "unknown", work_context: TeamWorkContext | TaskWorkContext | None = None) -> CallToolResult:
         try:
+            produced_context=None
+            def operation():
+                nonlocal produced_context
+                if work_context is not None:
+                    if team_registry is None:raise ContextError('INVALID_WORK_CONTEXT','Work context requires a linked Registry team')
+                    from .work_context import WorkContextService
+                    produced_context=WorkContextService(team_registry,runtime_revision).validate(host_id,thread_id,work_context.model_dump() if hasattr(work_context,'model_dump') else work_context)
+                result=registry.read(host_id,thread_id)
+                if produced_context is not None:
+                    proof=produced_context['validation'];member=result.get('member',{}) if isinstance(result,dict) else {};binding=member.get('binding',{})
+                    if not isinstance(result,dict) or result.get('status')!='active' or result.get('team',{}).get('id')!=produced_context['teamId'] or member.get('memberId')!=proof['memberId'] or member.get('role')!=proof['role'] or binding.get('hostId')!=proof['hostId'] or binding.get('threadId')!=proof['threadId']:
+                        produced_context=None;raise ContextError('WORK_CONTEXT_CHANGED','Context identity changed during read')
+                return result
             result = observed_call(
                 recorder,
                 lambda: cast(TeamRegistry, team_registry).observation_identity(host_id, thread_id),
                 "team_context.read", reason,
-                lambda: registry.read(host_id, thread_id),
+                operation,
                 _classify_read,
+                work_context=lambda: produced_context,
             )
             return _json_result(result)
         except ContextError as exc:
             return _json_result(exc.as_dict(), is_error=True)
+
+    from .work_context import configure_read_context_schema
+    configure_read_context_schema(server)
 
     if registry_mode:
         team_registry = cast(TeamRegistry, registry)

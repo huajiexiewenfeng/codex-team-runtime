@@ -122,6 +122,7 @@ class ObservationRecorder:
     def record(
         self, started: tuple[str, int], identity: dict[str, Any], tool: str, reason: str,
         outcome: str, error_code: str | None, details: dict[str, Any] | None = None,
+        work_context: dict[str, Any] | None = None,
     ) -> None:
         try:
             if not self.allows(identity["teamId"]):
@@ -156,6 +157,10 @@ class ObservationRecorder:
                 "runtimeRevision": self.runtime_revision,
                 "runtimeRevisionSource": "unknown" if self.runtime_revision is None else "operator-declared",
             }
+            if work_context is not None:
+                from .work_context import validate_produced_context
+                event['workContext']=validate_produced_context(work_context,identity)
+                event['schemaVersion']=2
             if details is not None:
                 allowed = {"action", "taskId", "submissionId", "operationId", "attemptId", "reasonCode", "sourceVersion", "ledgerVersion", "requestBytes", "responseBytes"}
                 if not isinstance(details, dict) or not details.keys() <= allowed:
@@ -200,6 +205,7 @@ def observed_call(
     operation: Callable[[], T],
     classify: Callable[[T], str],
     details: Callable[[T | None], dict[str, Any]] | None = None,
+    work_context: Callable[[], dict[str, Any] | None] | None = None,
 ) -> T:
     if recorder is None:
         return operation()
@@ -226,7 +232,7 @@ def observed_call(
         if identity is None:
             return
         try:
-            recorder.record(started, identity, tool, reason, outcome, error_code, **({"details":details(None)} if details else {}))
+            recorder.record(started, identity, tool, reason, outcome, error_code, **({"details":details(None)} if details else {}), **({'work_context':work_context()} if work_context else {}))
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")
 
@@ -244,7 +250,7 @@ def observed_call(
             if outcome not in _OUTCOMES:
                 raise ValueError("Invalid internal observation outcome")
             code = result.get("reasonCode") if outcome == "error" and isinstance(result,dict) else None
-            recorder.record(started, identity, tool, reason, outcome, code, **({"details":details(result)} if details else {}))
+            recorder.record(started, identity, tool, reason, outcome, code, **({"details":details(result)} if details else {}), **({'work_context':work_context()} if work_context else {}))
         except Exception:
             _warn("OBSERVATION_WRITE_FAILED")
     return result
