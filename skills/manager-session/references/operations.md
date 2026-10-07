@@ -52,6 +52,9 @@ Project route: repository identity, saved projectId/host, actual workspace;
 Project context: PDC/graph or source-driven evidence references; contract revision,
   prerequisite acceptance and integration checks; unknowns affecting this task.
 Project workflow: applicable PDC stage or source-driven execution; preserve local gates.
+Metrics (when an explicit managed policy is enabled): verified policy path and own
+  task ID; docs/continuous-metrics.md; use stats-managed-step for actual commands
+  or begin/end at actual known work boundaries; no guessed historical steps.
 Configuration: requested and verified model/effort, or explicitly unverified effective settings.
 Helpers: whether bounded delegation is authorized; direct-parent model ceiling;
   selected default/allowed effort; no new team Manager or nested dispatch control plane.

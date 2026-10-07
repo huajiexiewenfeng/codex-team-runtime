@@ -1,4 +1,5 @@
-import { createStatsSnapshot, queryStats, readStatsLease, canonicalWindow } from './stats-query.mjs';
+import { createStatsSnapshot, queryStats, querySourceStatus, queryCurrentMemberSummaries, readStatsLease, canonicalWindow } from './stats-query.mjs';
+import {memberBindingHash} from './source-status.mjs';
 import { refreshStats, readStatsIndex, readStatsData } from './stats-collector.mjs';
 import { check, hash, LIMITS, RULES_VERSION } from './stats-contract.mjs';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
@@ -18,7 +19,7 @@ export function parseDashboardQuery(params){
 }
 export function projectDashboardState(state,{asOf=state.updatedAt}={}){
   const progress=new Map();for(const e of state.events)if(e.taskId)progress.set(e.taskId,e.at);
-  const roster=state.members.map(m=>({id:m.id,name:text(m.name,256),role:m.role,lifecycle:m.lifecycle,bindingStatus:m.binding.status,
+  const roster=state.members.map(m=>({id:m.id,name:text(m.name,256),role:m.role,lifecycle:m.lifecycle,bindingStatus:m.binding.status,bindingHash:memberBindingHash(m),
     nameProvenance:{sourceKind:'current-state-roster',sourceVersion:state.version,asOf:state.updatedAt,evidenceId:hash([state.team.id,state.version,m.id])}}));
   const tasks=state.tasks.map(t=>({id:t.id,taskId:t.id,title:text(t.title),roundId:t.roundId,status:t.status,ownerId:t.workerId,
     assignedAt:t.assignedAt,completedAt:t.completedAt,updatedAt:t.stages.at(-1)?.startedAt??state.updatedAt,
@@ -77,11 +78,11 @@ export function createDashboardQueries({teamId,current,manifestPath,cache,now=Da
     // 32 MiB aggregate admission limits. Decode is bounded by that same total
     // budget; only response pages expand stages. No task/history is discarded.
     const raw=JSON.stringify(state);check(Buffer.byteLength(raw)<=32*LIMITS.responseBytes,'bounded_budget_busy');const projection=deflateRawSync(raw),bytes=projection.byteLength;check(bytes<=LIMITS.responseBytes,'bounded_budget_busy');prune(bytes);
-    const frozen=await createStatsSnapshot(cache,{now:now()}),id=hash([frozen.baseSnapshotId,state.sourceVersion]),createdAt=now(),value={id,statsBaseId:frozen.baseSnapshotId,projection,createdAt,expiresAt:frozen.expiresAt,bytes,statsAsOf:index.statsAsOf,statsCheckedAt:index.checkedAt,manifestRevision:index.manifestRevision,collectorVersion:index.collectorVersion};
+    const frozen=await createStatsSnapshot(cache,{now:now()}),id=hash([frozen.baseSnapshotId,state.sourceVersion]),createdAt=now(),value={id,statsBaseId:frozen.baseSnapshotId,projection,createdAt,expiresAt:frozen.expiresAt,bytes,statsAsOf:index.statsAsOf,statsCheckedAt:index.checkedAt,manifestRevision:index.manifestRevision,collectorVersion:index.collectorVersion,managedPolicy:index.managedPolicy??null};
     bases.set(id,value);latestKey=key;latestBase=id;return {...value,state};
   };
   const envelope=(b,data,extra={})=>({schemaVersion:2,teamId,queryHash:hash(data.query??data),querySnapshotId:b.id,baseSnapshotId:b.id,snapshotExpiresAt:new Date(b.expiresAt).toISOString(),checkedAt:new Date(now()).toISOString(),stateAsOf:b.state.stateAsOf,statsAsOf:b.statsAsOf,
-    versions:{sourceVersion:b.state.sourceVersion,registryRevision:b.state.registryRevision,sourceManifestRevision:b.manifestRevision,collectorVersion:b.collectorVersion,rulesVersion:RULES_VERSION,runtimeRevision:null,runtimeRevisionSource:'not-provided'},freshness:{state:'fresh',stats:'partial',coverageNotProven:true},data,...extra});
+    versions:{sourceVersion:b.state.sourceVersion,registryRevision:b.state.registryRevision,sourceManifestRevision:b.manifestRevision,collectorVersion:b.collectorVersion,rulesVersion:RULES_VERSION,runtimeRevision:null,runtimeRevisionSource:'not-provided'},freshness:{state:'fresh',stats:b.managedPolicy&&b.managedPolicy.status!=='active'?'stale':'partial',coverageNotProven:true},...(b.managedPolicy?{managedPolicy:b.managedPolicy}:{}),data,...extra});
   const metrics=async(b,input,view)=>{
     if(input.parentSnapshotId){const parent=await readStatsLease(cache,input.parentSnapshotId,{now:now()});check(parent.baseSnapshotId===b.statsBaseId,'snapshot_query_mismatch');
       check(parent.kind!=='base'&&parent.query,'snapshot_query_mismatch');const childWindow=canonicalWindow(input,b.statsCheckedAt);
@@ -95,7 +96,10 @@ export function createDashboardQueries({teamId,current,manifestPath,cache,now=Da
           // selected binding must actually belong to the filtered parent view.
         }else check(input.search===parent.query.search,'snapshot_query_mismatch');}}
     const result=await queryStats(cache,{...pick(input,statsFields),view,baseSnapshotId:b.statsBaseId},{now:now()});check(result.teamId===teamId,'scope_denied');
-    return {...result,baseSnapshotId:b.id,statsSourceSnapshotId:b.statsBaseId,stateAsOf:b.state.stateAsOf,versions:{...result.versions,sourceVersion:b.state.sourceVersion,registryRevision:b.state.registryRevision,rulesVersion:RULES_VERSION,runtimeRevision:null,runtimeRevisionSource:'not-provided'},freshness:{...result.freshness,state:'fresh'},parentSnapshotId:input.parentSnapshotId??null};
+    const active=b.state.roster.filter(m=>m.lifecycle==='active'),ids=new Set([...result.data.rows.map(r=>r.memberId).filter(Boolean),...active.slice(((input.page??1)-1)*(input.pageSize??20),(input.page??1)*(input.pageSize??20)).map(m=>m.id)]);
+    const audit=await querySourceStatus(cache,active.filter(m=>ids.has(m.id)),pick(input,['preset','from','to']),{baseSnapshotId:b.statsBaseId,now:now()});const health=new Map(audit.rows.map(r=>[r.memberId,r]));
+    const data={...result.data,currentSourceStatus:audit.rows,currentSourceStatusTotal:active.length,rows:result.data.rows.map(r=>{const current=health.get(r.memberId);return current?.bindingKeys.includes(r.id)?{...r,sourceStatus:current.metrics}:r;})};
+    return {...result,data,baseSnapshotId:b.id,statsSourceSnapshotId:b.statsBaseId,stateAsOf:b.state.stateAsOf,versions:{...result.versions,sourceVersion:b.state.sourceVersion,registryRevision:b.state.registryRevision,rulesVersion:RULES_VERSION,runtimeRevision:null,runtimeRevisionSource:'not-provided'},freshness:{...result.freshness,state:'fresh'},parentSnapshotId:input.parentSnapshotId??null};
   };
   const taskRows=async(b,input)=>{
     const query={...pick(input,['search','memberId','roundId','status']),sort:input.sort??'updatedAt',direction:input.direction??'desc',pageSize:input.pageSize??20};check(['id','updatedAt','assignedAt','title','status'].includes(query.sort),'invalid_query');
@@ -123,7 +127,8 @@ export function createDashboardQueries({teamId,current,manifestPath,cache,now=Da
     }
     if(endpoint==='overview'){
       const result=await metrics(b,{...input,view:undefined,search:undefined,page:1,pageSize:20},'days');const members=await metrics(b,{...input,page:input.page??1,pageSize:input.pageSize??20},'members');const currentIds=new Set(b.state.roster.filter(m=>m.lifecycle==='active').map(m=>m.id));
-      return {...result,data:{teamName:b.state.teamName,counts:currentCounts(b.state),members:members.data,currentMemberCount:currentIds.size,summary:result.data.summary,recentAccepted:b.state.tasks.filter(t=>t.status==='approved').toSorted((a,c)=>compare(c.completedAt,a.completedAt)||compare(a.id,c.id)).slice(0,3).map(t=>({id:t.id,title:t.title,completedAt:t.completedAt})),historyBasis:'binding epochs stay separate from current roster'}};
+      const currentPage=pageRows(b.state.roster.filter(m=>m.lifecycle==='active'),input),currentMemberSummaries=await queryCurrentMemberSummaries(cache,currentPage.rows,pick(input,['preset','from','to']),{baseSnapshotId:b.statsBaseId,now:now()});
+      return {...result,data:{teamName:b.state.teamName,counts:currentCounts(b.state),members:members.data,currentMemberSummaries,currentSourceStatus:members.data.currentSourceStatus,currentMemberCount:currentIds.size,summary:result.data.summary,recentAccepted:b.state.tasks.filter(t=>t.status==='approved').toSorted((a,c)=>compare(c.completedAt,a.completedAt)||compare(a.id,c.id)).slice(0,3).map(t=>({id:t.id,title:t.title,completedAt:t.completedAt})),historyBasis:'current tuple/revision summaries across authorization segments; true historical bindings stay separate'}};
     }
     if(endpoint==='coverage')return metrics(b,input,'coverage');
     if(endpoint==='timeline'){check(input.taskId,'invalid_query');return metrics(b,input,input.view==='steps'?'steps':input.view==='members'?'members':'time');}

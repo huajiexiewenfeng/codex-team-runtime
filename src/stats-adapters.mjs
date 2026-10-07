@@ -30,11 +30,18 @@ export function createJsonlAdapter(source,manifest,checkpoint={}) {
     push(entry,offset,rootKeys){
       state.line++;const rows=[],diagnostics=[];
       if(usage){
+        // Native UTC wire timestamps may omit trailing fractional zeroes.
+        // Canonicalize only this known format; event/receipt schemas stay strict.
+        if(typeof entry.timestamp==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(entry.timestamp)&&Number.isFinite(Date.parse(entry.timestamp)))entry={...entry,timestamp:new Date(entry.timestamp).toISOString()};
         usage.push(JSON.stringify(entry));const result=usage.drain();state.usage=usage.checkpoint();
         diagnostics.push(...result.diagnostics.map(d=>({code:d.code,offset})));
         for(const r of result.records)rows.push(projected({id:r.id,kind:'token',at:r.at,hostId:r.hostId,threadId:r.threadId,turnId:r.turnId,usage:r.usage,stableIdentity:false,missing:['rotation-dedup-not-proven']}));
         const p=entry.payload??{};
         if(entry.type==='response_item'&&['function_call','custom_tool_call','function_call_output','custom_tool_call_output'].includes(p.type)){
+          // Some resumed/new-thread histories carry inherited tool outputs
+          // without a call identity. They cannot be paired or counted, but do
+          // not invalidate independently identified later usage records.
+          if(p.call_id===undefined||p.call_id===null){diagnostics.push({code:'native_call_identity_missing',offset});return {rows:rows.filter(Boolean),diagnostics};}
           check(state.usage.sessionSeen,'native_identity_missing');const callId=id(p.call_id),at=time(entry.timestamp);
           if(p.type.endsWith('output')){
             const start=state.openCalls[callId];

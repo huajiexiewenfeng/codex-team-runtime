@@ -16,7 +16,8 @@ export function canonical(v) { if(Array.isArray(v))return v.map(canonical);if(v&
 export const hash = v => createHash('sha256').update(typeof v==='string'?v:JSON.stringify(canonical(v))).digest('hex');
 export function bindingKey(teamId,b) { return hash([teamId,b.memberId,b.bindingRevision,b.hostId,b.threadId,b.roleEpoch]); }
 export function validateManifest(value, directory) {
-  exact(value,['schemaVersion','teamId','registryId','revision','authorizationRef','sources']);
+  exact(value,['schemaVersion','teamId','registryId','revision','authorizationRef','sources','managedPolicy'],['schemaVersion','teamId','registryId','revision','authorizationRef','sources']);
+  if(value.managedPolicy){exact(value.managedPolicy,['policyId','path']);id(value.managedPolicy.policyId);check(typeof value.managedPolicy.path==='string'&&isAbsolute(value.managedPolicy.path),'managed_policy_reference');}
   check(value.schemaVersion==='dashboard-sources/v1');id(value.teamId);id(value.registryId);
   check(Number.isSafeInteger(value.revision)&&value.revision>0);check(typeof value.authorizationRef==='string'&&value.authorizationRef.length>0&&value.authorizationRef.length<=4000);
   check(Array.isArray(value.sources)&&value.sources.length<=LIMITS.sources);

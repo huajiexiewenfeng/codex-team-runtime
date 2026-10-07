@@ -30,6 +30,21 @@ export function buildDetailRequest(d,fallbackWindow,{pin=true,target=null}={}){
   if(pin&&d.querySnapshotId&&d.type!=='task')query.snapshotId=d.querySnapshotId;return {path,query};
 }
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sourceLabels={configured:'已配置','not-configured':'未配置',unverified:'配置待核对',unbound:'当前未绑定',observed:'已观测','no-records':'无记录','not-observed':'未观测','read-error':'读取异常','authorization-expired':'授权过期','range-limited':'窗口不全','reading-incomplete':'补采中','not-read':'尚未读取','continuity-unproven':'连续性未证明','profile-incomplete':'指标字段不全','missing-endpoints':'缺完整起止'};
+Object.assign(sourceLabels,{'policy-revoked':'读取策略已撤销','policy-expired':'读取策略已过期','policy-unavailable':'读取策略核对异常','managed_index_unavailable':'定向索引不可用','managed_index_missing':'当前会话路径未找到','managed_candidate_identity_mismatch':'会话身份不匹配','managed_candidate_identity_unavailable':'会话身份未核验','managed_candidate_unavailable':'会话来源不可用','managed_binding_gap':'身份变化期间覆盖未知','managed_discovery_budget':'本次发现预算已用完'});
+const sourceActions={'refresh-approved-sources':'刷新已批准来源核对配置','provide-explicit-candidate':'提供明确候选路径，由来源所有者接入','inspect-source-diagnostics':'检查来源读取诊断，已有数据仍保留','review-authorized-window':'由来源所有者核对授权窗口','check-approved-input-and-refresh':'核对实际输入并刷新已批准源','partial-observation-only':'仅部分观测，完整覆盖未证明','inspect-managed-policy':'由来源所有者核对读取策略；已有快照保留'};
+const sourceSeriesLabels={'native':'原生观测','team-context':'TC观测','team-context-report':'报告副本','activity-sidecar':'步骤声明','token':'Token源记录','reported-step':'报告步骤'};
+export function sourceStatusMarkup(metrics,metric=null,memberId=''){
+  if(!metrics)return '';const names={token:'Token',mcp:'MCP',time:'耗时'},keys=metric?[metric]:['token','mcp','time'];
+  const label=s=>s.collection==='observed'?'已观测':s.configuration==='configured'?'已配置·无记录':sourceLabels[s.configuration]??'待核对';
+  const summary=metric?`${metrics[metric].configuration==='unverified'?'待核对':metrics[metric].collection==='observed'?'已观测':metrics[metric].configuration==='configured'?'无记录':metrics[metric].configuration==='not-configured'?'未配置':'待核对'}${metrics[metric].problems.length?' *':''}`:'来源状态';
+  return `<button type="button" class="source-trigger" data-source-member="${esc(memberId)}" data-source-metric="${esc(metric??'all')}" data-focus-key="source-${esc(memberId)}-${esc(metric??'all')}" aria-haspopup="dialog" title="${esc(metric?label(metrics[metric]):'当前绑定来源，完整覆盖未证明')}">${esc(summary)}</button>`;
+}
+export function sourceStatusFacts(metrics,metric=null){const names={token:'Token',mcp:'MCP',time:'耗时'},keys=metric?[metric]:['token','mcp','time'];return `<section class="source-facts"><p class="sub">当前身份元组核对；历史 epoch 与授权窗按原记录保留。完整覆盖未证明。</p>${keys.map(k=>{const s=metrics[k];if(!s)return '';return `<p><strong>${names[k]}</strong> · ${esc(sourceLabels[s.configuration])} · ${esc(sourceLabels[s.collection])}（源记录 ${number(s.observedRecords)} 条${k==='mcp'?'，非调用总数':''}）<br>${esc((s.observedBySeries??[]).map(r=>`${sourceSeriesLabels[r.sourceKind]??r.sourceKind} ${number(r.records)} 条`).join(' / '))}<br>${esc(s.problems.map(p=>sourceLabels[p]??p).join(' / ')||'完整覆盖未证明')}<br>${esc(sourceActions[s.action])}</p><details><summary>来源证据</summary><p>${s.evidence.map(e=>`${esc(e.sourceId)} · ${esc(e.status)} · ${esc(e.authorizedFrom)} — ${esc(e.authorizedTo)}${e.diagnosticCodes.length?' · '+esc(e.diagnosticCodes.join(' / ')):''}`).join('<br>')}</p></details>`;}).join('')}</section>`;}
+export function overviewMemberSummary(data,member){
+  if(data.currentMemberSummaries){const row=data.currentMemberSummaries.find(r=>r.memberId===member.id);return row?.identityHash===member.bindingHash?row:null;}
+  const matches=data.members.rows.filter(r=>r.memberId===member.id);return matches.length===1?matches[0]:null;
+}
 const number=v=>v===null||v===undefined?'未记录':Number(v).toLocaleString('zh-CN');
 const ms=v=>v===null||v===undefined?'未记录':v<1000?`${v} ms`:v<60000?`${(v/1000).toFixed(2)} 秒`:`${Math.floor(v/60000)} 分 ${Math.round(v%60000/1000)} 秒`;
 const stageTime=s=>['approved','cancelled'].includes(s?.status)?'终态时间点':s?.declaredElapsedToAsOfMs!==null&&s?.declaredElapsedToAsOfMs!==undefined?`${ms(s.declaredElapsedToAsOfMs)} · 进行中声明估算`:ms(s?.durationMs);
@@ -70,6 +85,18 @@ export function bootDashboardV2(doc=globalThis.document){
   if(!['overview','tasks','metrics'].includes(state.view))state.view='overview';if(!['time','token','mcp'].includes(state.dimension))state.dimension='time';
   let current=null,statsBase=null,pendingBase=null,lastMain=null,lastOverview=null,taskBase=null,taskSnapshot=null,mainSnapshot=null,detail=null,detailData=null,renderedDetail=null,paused=false,authLost=false,restoreDetail=true,pendingTaskTarget=null;
   const detailRecovery=createDetailRecovery();
+  let sourceView=null,sourceReturnFocus=null;
+  const focusSource=opener=>(opener?.isConnected?opener:[...doc.querySelectorAll('[data-focus-key]')].find(n=>n.dataset.focusKey===opener?.dataset.focusKey))?.focus({preventScroll:true});
+  function clearSourceView(){const saved=sourceView;if(!saved)return null;sourceView=null;saved.panel.remove();for(const item of saved.children)item.node.hidden=item.hidden;for(const item of saved.actions)item.node.hidden=item.hidden;$('detail-heading').textContent=saved.heading;dialog.querySelector('.modal-body').scrollTop=saved.scroll;dialog.classList.remove('source-mode');return saved;}
+  function closeSourceView(){const saved=clearSourceView();if(!saved)return;if(saved.wasOpen)focusSource(saved.opener);else{sourceReturnFocus=saved.opener;dialog.close();}}
+  function openSourceView(memberId,metric,opener){
+    const reply=dialog.open?detailData:state.view==='overview'?lastOverview:lastMain,health=reply?.data.currentSourceStatus?.find(r=>r.memberId===memberId);if(!health){message('来源配置快照尚未就绪，请刷新后再查看。');return;}
+    detailLane.cancel();detailBusy(false);const body=dialog.querySelector('.modal-body'),panel=doc.createElement('div');
+    sourceView={wasOpen:dialog.open,opener,panel,heading:$('detail-heading').textContent,scroll:body.scrollTop,children:[...body.children].map(node=>({node,hidden:node.hidden})),actions:['detail-back','detail-retry','detail-refresh'].map(id=>({node:$(id),hidden:$(id).hidden}))};
+    for(const item of [...sourceView.children,...sourceView.actions])item.node.hidden=true;
+    panel.innerHTML=sourceStatusFacts(health.metrics,metric==='all'?null:metric);body.append(panel);body.scrollTop=0;$('detail-heading').textContent=`${health.name??memberId} · 来源状态`;dialog.classList.add('source-mode');
+    if(!dialog.open){dialog.showModal();doc.body.classList.add('metrics-modal-open');}$('detail-close').focus({preventScroll:true});
+  }
   const visible=()=>doc.visibilityState!=='hidden';
   const syncUrl=()=>{const q=new URLSearchParams();for(const key of urlKeys)if(state[key]!==undefined&&state[key]!==''&&state[key]!==null)q.set(key,String(state[key]));win.history.replaceState(null,'',win.location.pathname+'?'+q);};
   const windowQuery=()=>state.preset==='custom'?{preset:'custom',from:state.from,to:state.to}:{preset:state.preset};
@@ -101,15 +128,16 @@ export function bootDashboardV2(doc=globalThis.document){
   };
   const renderCoverage=data=>{
     if(data.window)$('window-label').textContent=`${data.window.from} — ${data.window.to} · 北京时间`;
-    $('stats-asof').textContent=`统计采集 ${date(data.statsAsOf)} · 当前查看快照 ${data.baseSnapshotId?.slice(0,8)??'未知'}`;
+    const policy=data.managedPolicy;
+    $('stats-asof').textContent=`统计采集 ${date(data.statsAsOf)} · 当前查看快照 ${data.baseSnapshotId?.slice(0,8)??'未知'}${policy?` · 持续读取${policy.status==='active'?'已授权':sourceLabels['policy-'+policy.status]??'状态待核对'}（截至 ${date(policy.permissionTo)}）`:''}`;
     const coverage=data.coverage??[],asOf=[...new Set(coverage.map(s=>s.sourceAsOf).filter(Boolean))];
     setHtml($('coverage-view'),`<p>来源 ${coverage.length} 项 · ${coverage.filter(s=>s.status==='fresh').length} 项已读 · ${coverage.filter(s=>s.status!=='fresh').length} 项陈旧/补采/异常。完整窗口覆盖尚未证明。</p><p>来源实际截至：${asOf.slice(0,5).map(date).join(' / ')||'未知'}。统计核对 ${date(data.checkedAt)}；来源截至与业务状态分别记录。</p><p ${metricsNoteAttributes(data.data.summary)}>${esc(metricsNote(data.data.summary))}</p>`);
     $('dataset-label').textContent='绑定来源 · 部分覆盖；缺端、未归属和未接入维持未知';
   };
   const renderOverview=data=>{
-    lastOverview=data;const entries=data.data.members.rows,roster=current?.data.rows??entries.map(r=>({id:r.memberId,name:r.name,role:r.role}));
-    const rows=roster.map(m=>{const matches=entries.filter(r=>r.memberId===m.id),r=matches.length===1?matches[0]:null;
-      return `<tr data-live-key="member-${esc(m.id)}">${cell(button(m.name??m.id,`data-member="${esc(m.id)}" data-focus-key="member-${esc(m.id)}"`)+`<span class="role-line">${esc(m.role)} · ${matches.length>1?'多个历史绑定':r?.coverage??'sourcesPending'}</span>`)}${cell(m.currentTask?button(m.currentTask.title,`data-task="${esc(m.currentTask.id)}"`):'—')}${cell(esc(status(m.currentTask?.status??'当前无任务')))}${cell(matches.length>1?'查看绑定明细':`<span class="row-meta">步骤活动（声明） ${esc(declaredActivityText(r?.time))}</span><span class="row-meta">MCP 调用（TC） ${ms(union(r?.time,'team-context'))}</span>`)}${cell(matches.length>1?'查看绑定明细':button(formatToken(total(r?.time)),`data-member-metric="token" data-member="${esc(m.id)}" ${tokenAttributes(total(r?.time))}`))}${cell(matches.length>1?'查看绑定明细':button(number(calls(r?.time,'team-context')),`data-member-metric="mcp" data-member="${esc(m.id)}"`))}</tr>`;});
+    lastOverview=data;const entries=data.data.members.rows,roster=current?.data.rows??data.data.currentMemberSummaries?.map(r=>({id:r.memberId,name:r.name,role:r.role,bindingHash:r.identityHash}))??entries.map(r=>({id:r.memberId,name:r.name,role:r.role}));
+    const rows=roster.map(m=>{const matches=data.data.currentMemberSummaries?[]:entries.filter(r=>r.memberId===m.id),r=overviewMemberSummary(data.data,m),health=data.data.currentSourceStatus?.find(s=>s.memberId===m.id)?.metrics;
+      return `<tr data-live-key="member-${esc(m.id)}">${cell(button(m.name??m.id,`data-member="${esc(m.id)}" data-focus-key="member-${esc(m.id)}"`)+`<span class="role-line">${esc(m.role)} · ${matches.length>1?'多个历史绑定':r?.coverage??'sourcesPending'}</span>`+sourceStatusMarkup(health,null,m.id))}${cell(m.currentTask?button(m.currentTask.title,`data-task="${esc(m.currentTask.id)}"`):'—')}${cell(esc(status(m.currentTask?.status??'当前无任务')))}${cell(matches.length>1?'查看绑定明细':`<span class="row-meta">步骤活动（声明） ${esc(declaredActivityText(r?.time))}</span><span class="row-meta">MCP 调用（TC） ${ms(union(r?.time,'team-context'))}</span>`)}${cell(matches.length>1?'查看绑定明细':button(formatToken(total(r?.time)),`data-member-metric="token" data-member="${esc(m.id)}" ${tokenAttributes(total(r?.time))}`)+sourceStatusMarkup(health,'token',m.id))}${cell(matches.length>1?'查看绑定明细':button(number(calls(r?.time,'team-context')),`data-member-metric="mcp" data-member="${esc(m.id)}"`)+sourceStatusMarkup(health,'mcp',m.id))}</tr>`;});
     setHtml($('overview-table'),rowsTable(['成员 / 角色（全名）','当前任务','业务状态','步骤活动 / MCP 调用','Token 消耗','MCP · TC'],rows,'member-table')+pager('overview',current?.data??data.data.members)+`<p class="sub">当前成员名字来自核验台账 ${date(current?.stateAsOf??data.stateAsOf)}，不推定历史 epoch 名称；声明步骤活动与机器MCP调用分别显示，不相加、不代表完整工作时长。`+button('查看窗口内历史绑定', 'data-history-members="true"')+'</p>');
     setHtml($('recent-accepted'),rowsTable(['最近验收成果','验收时间（北京）'],data.data.recentAccepted.map(t=>`<tr>${cell(button(t.title,`data-task="${esc(t.id)}"`))}${cell(date(t.completedAt))}</tr>`),'accepted-table'));
   };
@@ -141,8 +169,8 @@ export function bootDashboardV2(doc=globalThis.document){
     else{statsBase=captured;mainSnapshot=null;void runMain({pin:false});message(paused?'自动更新已暂停 · 本次手动刷新完成。':'状态每5秒 / 统计每30秒 · 页面可见时按需有界读取。');}},onStatus:s=>{if(s==='unauthorized')error({status:401});else if(s==='unavailable')message('统计采集失败 · 保留最近成功数据；可手动重试。');}});
   const memberCells=(r,dimension)=>{
     const name=button(r.name??r.memberId,`data-member="${esc(r.memberId)}"`)+`<span class="row-meta">${esc(r.role)} · ${esc(r.roleEpoch??'unbound')} · 名称截至 ${date(r.nameProvenance?.asOf)}</span>`;
-    const coverage=esc(r.coverage)+`<span class="row-meta">${esc(memberAttributionText(r.time))}</span>`;
-    if(dimension==='token')return [name,...['input','cachedInput','output','reasoningOutput','total'].map(k=>tokenValueMarkup(r.time.token.nativeTotal[k].known)),esc(r.coverage)];
+    const coverage=esc(r.coverage)+`<span class="row-meta">${esc(memberAttributionText(r.time))}</span>`+sourceStatusMarkup(r.sourceStatus,dimension,r.memberId);
+    if(dimension==='token')return [name,...['input','cachedInput','output','reasoningOutput','total'].map(k=>tokenValueMarkup(r.time.token.nativeTotal[k].known)),coverage];
     if(dimension==='mcp')return [name,...['native','team-context','team-context-report'].map(kind=>calls(r.time,kind)===null?'未记录':button(number(calls(r.time,kind)),`data-calls-member="${esc(r.memberId)}" data-binding="${esc(r.id)}" data-series="${kind}"`)),coverage];
     return [name,...['native','team-context'].map(kind=>ms(union(r.time,kind))),esc(declaredActivityText(r.time)),button('查看明确关联步骤',`data-steps-member="${esc(r.memberId)}" data-binding="${esc(r.id)}"`),coverage];
   };
@@ -185,7 +213,7 @@ export function bootDashboardV2(doc=globalThis.document){
   function captureRenderedView(){return renderedDetail?{...captureDetailView(),detail:{...renderedDetail.detail},data:renderedDetail.data}:null;}
   function restoreDetailView(view,history=view.detail.history){detail={...view.detail,history:[...history]};detailData=view.data;renderedDetail={...view,detail:{...detail}};deferred.delete($('detail-content'));deferred.delete($('detail-controls'));$('detail-heading').textContent=view.heading;$('detail-snapshot').textContent=view.snapshot;if($('detail-content').innerHTML!==view.html)$('detail-content').innerHTML=view.html;if($('detail-controls').innerHTML!==view.controls)$('detail-controls').innerHTML=view.controls;dialog.querySelector('.modal-body').scrollTop=view.scrollY;[...dialog.querySelectorAll('.table-wrap,.step-scroll')].forEach((n,i)=>{n.scrollLeft=view.scrolls?.[i]?.x??0;n.scrollTop=view.scrolls?.[i]?.y??0;});for(const saved of view.inputs??[]){const n=doc.getElementById(saved.id);if(n&&dialog.contains(n)){n.value=saved.value;if(saved.checked!==undefined)n.checked=saved.checked;}}$('detail-back').hidden=!history.length;}
   function runDetail({pin=true,target=null}={}){
-    if(!detail||!visible()||authLost)return Promise.resolve();const d=detail,focusKey=dialog.contains(doc.activeElement)?doc.activeElement.dataset.focusKey??doc.activeElement.id:null;detailRecovery.begin(captureRenderedView());detailBusy(true);$('detail-status').textContent=renderedDetail?'正在读取目标；上次详情暂保留。':'正在按固定快照读取详情…';$('detail-retry').hidden=true;
+    if(sourceView||!detail||!visible()||authLost)return Promise.resolve();const d=detail,focusKey=dialog.contains(doc.activeElement)?doc.activeElement.dataset.focusKey??doc.activeElement.id:null;detailRecovery.begin(captureRenderedView());detailBusy(true);$('detail-status').textContent=renderedDetail?'正在读取目标；上次详情暂保留。':'正在按固定快照读取详情…';$('detail-retry').hidden=true;
     return detailLane.run({...buildDetailRequest(d,windowQuery(),{pin,target}),focusKey,attempt:{...d,history:[...(d.history??[])],target}});
   }
   function openDetail(next,opener=doc.activeElement){
@@ -205,16 +233,18 @@ export function bootDashboardV2(doc=globalThis.document){
     $('view-title').textContent={overview:'团队总览',tasks:'任务进度',metrics:'指标统计'}[view];doc.title=`CODEX / TEAM · ${$('view-title').textContent}`;$('metric-search').placeholder=dimension==='time'?'任务名称或 ID':'北京日期';syncUrl();void runMain({pin:false});
   }
   const closeDetail=()=>dialog.close();
-  dialog.addEventListener('close',()=>{detailLane.cancel();detailRecovery.clear();renderedDetail=null;detailBusy(false);$('detail-retry').hidden=true;doc.body.classList.remove('metrics-modal-open');const opener=detail?.openerKey;detail=null;state.detail=null;state.taskId=null;state.day=null;state.memberId=null;deferred.clear();syncUrl();
+  dialog.addEventListener('close',()=>{const sourceOpener=sourceReturnFocus??clearSourceView()?.opener;sourceReturnFocus=null;detailLane.cancel();detailRecovery.clear();renderedDetail=null;detailBusy(false);$('detail-retry').hidden=true;doc.body.classList.remove('metrics-modal-open');const opener=detail?.openerKey;detail=null;state.detail=null;state.taskId=null;state.day=null;state.memberId=null;deferred.clear();syncUrl();
     if(pendingBase){statsBase=pendingBase;pendingBase=null;mainSnapshot=null;void runMain({pin:false});}
-    (doc.getElementById(opener)??[...doc.querySelectorAll('[data-focus-key]')].find(n=>n.dataset.focusKey===opener)??doc.querySelector(`[data-nav="${state.view}"]`))?.focus({preventScroll:true});});
-  dialog.addEventListener('click',e=>{const box=dialog.getBoundingClientRect();if(e.target===dialog&&(e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom))closeDetail();});
-  dialog.addEventListener('keydown',e=>{if(e.key!=='Tab')return;const nodes=[...dialog.querySelectorAll('button,a,input,select,[tabindex]')].filter(n=>!n.disabled&&n.getClientRects().length&&n.tabIndex>=0),first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&doc.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&doc.activeElement===last){e.preventDefault();first?.focus();}});
-  $('detail-close').onclick=closeDetail;
+    if(sourceOpener)focusSource(sourceOpener);else (doc.getElementById(opener)??[...doc.querySelectorAll('[data-focus-key]')].find(n=>n.dataset.focusKey===opener)??doc.querySelector(`[data-nav="${state.view}"]`))?.focus({preventScroll:true});});
+  dialog.addEventListener('cancel',e=>{if(sourceView){e.preventDefault();closeSourceView();}});
+  dialog.addEventListener('click',e=>{const box=dialog.getBoundingClientRect();if(e.target===dialog&&(e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom)){if(sourceView)closeSourceView();else closeDetail();}});
+  dialog.addEventListener('keydown',e=>{if(e.key!=='Tab')return;const nodes=[...dialog.querySelectorAll('button,a,input,select,summary,[tabindex]')].filter(n=>!n.disabled&&n.getClientRects().length&&n.tabIndex>=0),first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&doc.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&doc.activeElement===last){e.preventDefault();first?.focus();}});
+  $('detail-close').onclick=()=>{if(sourceView)closeSourceView();else closeDetail();};
   $('detail-back').onclick=()=>{detailLane.cancel();detailRecovery.clear();detailBusy(false);$('detail-retry').hidden=true;const previous=detail?.history?.pop();if(previous){const history=detail.history;if(previous.view){restoreDetailView(previous.view,history);$('detail-status').textContent='已返回原来源详情；可显式刷新。';$('detail-refresh').focus({preventScroll:true});}else{detail={...previous,history};void runDetail({pin:false});}}};
   $('detail-retry').onclick=()=>{const attempt=detailRecovery.retry();if(!attempt)return;const sameScope=renderedDetail?.detail.type===attempt.type&&renderedDetail?.detail.querySnapshotId===attempt.querySnapshotId;if(sameScope){detail={...attempt};void runDetail({target:attempt.target});}else openDetail(attempt);};
   $('detail-refresh').onclick=async()=>{if(!detail||authLost)return;try{const fresh=await request('snapshot',{refresh:'stats'});statsBase={id:fresh.baseSnapshotId,expiresAt:fresh.snapshotExpiresAt};pendingBase=null;mainSnapshot=null;detail.base=fresh.baseSnapshotId;detail.querySnapshotId=null;detail.parent=null;await runMain({pin:false});await runDetail({pin:false});message('已显式更新至新来源快照；筛选、页码和所选目标保持。');}catch(e){error(e);}};
   doc.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const d=b.dataset;
+    if(d.sourceMember){openSourceView(d.sourceMember,d.sourceMetric,b);return;}
     if(d.nav){navigate(d.nav);return;}if(d.dimension){state.mpage=1;navigate('metrics',d.dimension);return;}
     if(d.page){const p=Number(d.page);if(d.scope==='tasks'){state.tpage=p;void runMain();}else if(d.scope==='metrics'){state.mpage=p;void runMain();}else if(d.scope==='overview'){state.opage=p;void statePoller.refresh({replace:true});void runMain({pin:false});}else if(detail){detail.page=p;void runDetail();}syncUrl();return;}
     if(d.findTask){closeDetail();state.view='tasks';navigate('tasks');void runMain({pin:false,target:d.findTask});return;}

@@ -22,6 +22,7 @@ export class MetadataJsonParser {
     const keys=path.split('.');let o=this.projected;for(const k of keys.slice(0,-1)){check(!['__proto__','prototype','constructor'].includes(k),'source_bad_json');o=o[k]??=(Object.create(null));}o[keys.at(-1)]=value;
   }
   valueDone() { const top=this.stack.at(-1);if(top)top.state='comma';else this.rootState='done'; }
+  closeContainer(){const top=this.stack.pop();this.metadataBytes-=top.keyBytes??0;this.valueDone();}
   startString(key) {
     const path=this.path();this.mode='string';this.keyString=key;this.capture=key||(this.fields?this.fields.has(path):useful(path));this.token='';this.escape=false;this.unicode=0;this.unicodeValue='';this.pathValue=path;
     this.observer=!key&&this.observeNative&&['payload.output','payload.output.[].text','payload.arguments'].includes(path)?{prefix:'',parser:null,bad:false,path}:null;
@@ -59,7 +60,7 @@ export class MetadataJsonParser {
     if(c==='"') {
       this.mode=null;
       this.finishObserver();
-      if(this.keyString){const top=this.stack.at(-1);check(!top.keys.has(this.token),'source_duplicate_key');check(top.keys.size<1024,'source_metadata_limit');this.metadataBytes+=Buffer.byteLength(this.token);check(this.metadataBytes<=this.maxMetadataBytes,'source_metadata_limit');top.keys.add(this.token);top.key=this.token;top.state='colon';if(this.stack.length===1)this.rootKeys=[...top.keys];}
+      if(this.keyString){const top=this.stack.at(-1);check(!top.keys.has(this.token),'source_duplicate_key');check(top.keys.size<1024,'source_metadata_limit');const bytes=Buffer.byteLength(this.token);top.keyBytes=(top.keyBytes??0)+bytes;this.metadataBytes+=bytes;check(this.metadataBytes<=this.maxMetadataBytes,'source_metadata_limit');top.keys.add(this.token);top.key=this.token;top.state='colon';if(this.stack.length===1)this.rootKeys=[...top.keys];}
       else {this.put(this.token,this.pathValue);this.valueDone();}this.token='';return;
     }
     check(c.charCodeAt(0)>=32,'source_bad_json');this.stringValue(c);if(this.capture)check(this.token.length<=(this.keyString?256:this.maxMetadataBytes),'source_metadata_limit');
@@ -76,14 +77,14 @@ export class MetadataJsonParser {
       const state=this.state(),top=this.stack.at(-1);
       if(state==='colon'){check(c===':','source_bad_json');top.state='value';continue;}
       if(state==='comma') {
-        if(c===(top?.kind==='object'?'}':']')){this.stack.pop();this.valueDone();continue;}
+        if(c===(top?.kind==='object'?'}':']')){this.closeContainer();continue;}
         check(c===','&&top,'source_bad_json');top.state=top.kind==='object'?'key':'value';continue;
       }
       if(state==='firstKey'||state==='key') {
-        if(c==='}'&&state==='firstKey'){this.stack.pop();this.valueDone();continue;}
+        if(c==='}'&&state==='firstKey'){this.closeContainer();continue;}
         check(c==='"','source_bad_json');this.startString(true);continue;
       }
-      if(state==='firstValue'&&c===']'){this.stack.pop();this.valueDone();continue;}
+      if(state==='firstValue'&&c===']'){this.closeContainer();continue;}
       check(state==='value'||state==='firstValue','source_bad_json');
       const path=this.path();
       if(c==='{'||c==='['){check(this.stack.length<this.maxDepth,'source_depth_limit');this.stack.push({kind:c==='{'?'object':'array',path,state:c==='{'?'firstKey':'firstValue',key:null,keys:new Set()});continue;}

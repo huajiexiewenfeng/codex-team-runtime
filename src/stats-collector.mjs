@@ -7,6 +7,7 @@ import { atomicWrite } from './store.mjs';
 import { MetadataJsonParser } from './stats-json-stream.mjs';
 import { createJsonlAdapter, projectDocument, serverRow } from './stats-adapters.mjs';
 import { check, hash, time, LIMITS, validateManifest, COLLECTOR_VERSION, RULES_VERSION } from './stats-contract.mjs';
+import {validateServerMcpEvent} from './metrics-mcp-events.mjs';
 
 const sessions=new Map(),rootReaders=new Map(),inflight=new Map();
 const cacheName='stats-index.json';
@@ -30,10 +31,13 @@ async function anchors(handle,size,budget){
   check(budget.bytes+budget.anchorBytes+length*2<=budget.maxBytes,'source_read_budget_exhausted');
   const values=[];for(const offset of [0,Math.max(0,size-length)]){const b=Buffer.alloc(length);const {bytesRead}=await handle.read(b,0,length,offset);budget.anchorBytes+=bytesRead;check(bytesRead===length,'source_truncated');values.push(createHash('sha256').update(b).digest('hex'));}return {head:values[0],tail:values[1]};
 }
-function mergeRows(rows,incoming){
+function mergeRows(rows,incoming,diagnostics=[]){
   const map=new Map(rows.map(r=>[r.id,r]));
   for(const row of incoming){const old=map.get(row.id);if(old){
     if(hash(old)===hash(row))continue;
+    if(old.series==='native'&&row.series==='native'&&row.startAt===null&&row.missing?.includes('missing-start')&&old.bindingKey===row.bindingKey&&old.taskId===row.taskId){
+      diagnostics.push({code:'native_unpaired_response_conflict'});continue;
+    }
     // A paired completion replaces its own pending interval atomically.
     const progresses=old.series==='native'&&old.endAt===null&&old.responseAt===null&&row.responseAt!==null;
     const finalizes=old.kind==='interval'&&old.endAt===null&&(row.endAt!==null||progresses)&&old.startAt===row.startAt&&old.bindingKey===row.bindingKey&&old.taskId===row.taskId&&old.stepId===row.stepId&&old.series===row.series&&old.assurance===row.assurance;
@@ -85,7 +89,7 @@ async function collectJsonl(source,manifest,cache,previous,budget,checkedAt,opti
           const bytes=buffer.subarray(start,i);session.lineBytes+=bytes.length;check(session.lineBytes<=LIMITS.lineBytes,'source_line_limit');
           session.parser.push(session.decoder.decode(bytes,{stream:true}));session.parser.push(session.decoder.decode());
           const blank=session.parser.rootState==='value'&&session.parser.stack.length===0&&session.parser.mode===null;
-          const result=blank?(adapter.skipLine(),{rows:[],diagnostics:[]}):adapter.push(session.parser.finish(),session.lineOffset,session.parser.rootKeys??[]);rows=mergeRows(rows,result.rows);
+          const result=blank?(adapter.skipLine(),{rows:[],diagnostics:[]}):adapter.push(session.parser.finish(),session.lineOffset,session.parser.rootKeys??[]);rows=mergeRows(rows,result.rows,result.diagnostics);
           next.diagnostics.push(...result.diagnostics);check(next.diagnostics.length<=10000,'source_diagnostic_limit');
           next.committedOffset=position+i+1;next.parserState=adapter.checkpoint();next.lineNumber++;session.lineOffset=next.committedOffset;session.lineBytes=0;
           session.decoder=new TextDecoder('utf-8',{fatal:true});session.parser=new MetadataJsonParser();start=i+1;
@@ -120,14 +124,15 @@ async function collectDocument(source,manifest,cache,previous,budget,checkedAt){
   const next={...beginGeneration(previous,source,identity),signature,status:'fresh',dataRef:await storeData(cache,data),stagingRef:null,revalidating:false,committedOffset:info.size,scannedBoundary:info.size,readBytes:info.size,lastCheckedAt:checkedAt,lastSuccessAt:checkedAt,
     contentSha256:createHash('sha256').update(content).digest('hex'),sourceAsOf:data.metadata.asOf??null};return next;
 }
-function sourceDates(source){const dates=[];let at=Date.parse(source.authorizedFrom);const end=Date.parse(source.authorizedTo);check(end-at<=366*86400000,'source_range_limit');for(let day=Math.floor(at/86400000)*86400000;day<=end;day+=86400000)dates.push(new Date(day).toISOString().slice(0,10));return dates;}
-async function collectRoot(source,manifest,cache,previous,budget,checkedAt){
+function sourceDates(source,checkedAt){const dates=[];let at=Date.parse(source.authorizedFrom);const end=Math.min(Date.parse(source.authorizedTo),Date.parse(checkedAt));check(end-at<=366*86400000,'source_range_limit');for(let day=Math.floor(at/86400000)*86400000;day<=end;day+=86400000)dates.push(new Date(day).toISOString().slice(0,10));return dates;}
+async function collectRoot(source,manifest,cache,previous,budget,checkedAt,options){
   check(!(await lstat(source.path)).isSymbolicLink(),'source_symlink');const root=await realpath(source.path);check((await stat(root)).isDirectory(),'source_not_directory');
   const next=previous?.descriptorHash===hash(source)?structuredClone(previous):beginGeneration(previous,source,hash(root));next.files??={};next.cursor??={day:0,skip:0};next.readBytes=0;
-  const dates=sourceDates(source);let data=await loadData(cache,next.stagingRef??(next.revalidating?null:next.dataRef)),rows=data.rows,newFiles=0,entries=0;let finished=true;
+  const dates=sourceDates(source,checkedAt);let data=await loadData(cache,next.stagingRef??(next.revalidating?null:next.dataRef)),rows=data.rows,newFiles=0,entries=0;let finished=true;
   const readerKey=`${cache}/${source.sourceId}`;let reader=rootReaders.get(readerKey);
   if(reader&&(reader.descriptorHash!==hash(source)||reader.committedDay!==next.cursor.day||reader.committedSkip!==next.cursor.skip)){await reader.dir.close();rootReaders.delete(readerKey);reader=null;}
   outer:for(let day=next.cursor.day;day<dates.length;day++){
+    if(performance.now()-budget.started>=budget.wallMs){next.cursor={day,skip:next.cursor.skip};finished=false;break;}
     const path=join(root,dates[day]);try{check(!(await lstat(path)).isSymbolicLink(),'source_symlink');check(within(root,await realpath(path)),'source_path_escape');if(!reader)reader={dir:await opendir(path),ordinal:0,pending:null,descriptorHash:hash(source),committedDay:day,committedSkip:next.cursor.skip};}catch(e){if(e.code==='ENOENT'){next.diagnostics.push({code:'source_date_directory_missing',date:dates[day]});next.cursor={day:day+1,skip:0};continue;}throw e;}
     try{
       while(true){
@@ -141,7 +146,11 @@ async function collectRoot(source,manifest,cache,previous,budget,checkedAt){
         if(next.files[key]===signature)continue;
         check(s.size<=65536,'source_metadata_limit');if(budget.bytes+budget.anchorBytes+s.size>budget.maxBytes){reader.pending=entry;reader.wasPending=true;next.cursor={day,skip:reader.ordinal-1};finished=false;break outer;}
         const bytes=await readFile(file);budget.bytes+=bytes.length;next.readBytes+=bytes.length;const event=JSON.parse(bytes.toString('utf8'));check(entry.name===`${event.eventId}.json`,'source_event_filename_mismatch');
-        const row=serverRow(event,source,manifest);if(row)rows=mergeRows(rows,[row]);next.files[key]=signature;newFiles++;
+        if(options.allowedObservationTeams&&event.teamId!==manifest.teamId){
+          if(options.allowedObservationTeams.includes(event.teamId))validateServerMcpEvent(event,{registryId:manifest.registryId,teamId:event.teamId});
+          next.foreignEventsSkipped=(next.foreignEventsSkipped??0)+1;next.files[key]=signature;newFiles++;continue;
+        }
+        const row=serverRow(event,source,manifest);if(row&&(!options.strictObservationBindings||row.bindingKey))rows=mergeRows(rows,[row]);else if(row){next.unknownBindingsSkipped=(next.unknownBindingsSkipped??0)+1;if(!next.diagnostics.some(d=>d.code==='managed_unknown_binding'))next.diagnostics.push({code:'managed_unknown_binding'});}next.files[key]=signature;newFiles++;
       }
     }catch(e){await reader.dir.close();rootReaders.delete(readerKey);reader=null;throw e;}
     await reader.dir.close();rootReaders.delete(readerKey);reader=null;
@@ -169,15 +178,17 @@ async function refresh(manifestPath,cache,options){
     const start=previous?.nextSource??0,ordered=manifest.sources.map((s,i)=>({s,i})).sort((a,b)=>(a.s.sourceId===activeSource?-1:b.s.sourceId===activeSource?1:((a.i-start+manifest.sources.length)%manifest.sources.length)-((b.i-start+manifest.sources.length)%manifest.sources.length)));
     for(const {s} of ordered){
       const old=previous?.sources.find(x=>x.sourceId===s.sourceId);let next;
+      const gate=options.sourceGate?await options.sourceGate(s):null;
+      if(options.blockedSourceIds?.includes(s.sourceId)||gate?.allow===false){sources.push({...old??beginGeneration(null,s,null),status:'error',readBytes:0,failedCheckedAt:checkedAt,diagnostics:[...(old?.diagnostics??[]),{code:gate?.code??'managed_source_blocked'}].slice(-10000)});continue;}
       if(budget.bytes+budget.anchorBytes>=budget.maxBytes||performance.now()-budget.started>=budget.wallMs||(partialSession&&s.kind.endsWith('jsonl'))){sources.push({...old??beginGeneration(null,s,null),status:old?.status??'backfilling',readBytes:0});continue;}
-      try{next=s.kind.endsWith('jsonl')?await collectJsonl(s,manifest,cache,old,budget,checkedAt,options):s.kind==='team-context-root'?await collectRoot(s,manifest,cache,old,budget,checkedAt):await collectDocument(s,manifest,cache,old,budget,checkedAt);}
+      try{next=s.kind.endsWith('jsonl')?await collectJsonl(s,manifest,cache,old,budget,checkedAt,options):s.kind==='team-context-root'?await collectRoot(s,manifest,cache,old,budget,checkedAt,options):await collectDocument(s,manifest,cache,old,budget,checkedAt);}
       catch(e){next={...old??beginGeneration(null,s,null),status:'error',readBytes:0,failedCheckedAt:checkedAt,diagnostics:[...(old?.diagnostics??[]),{code:e.code??'source_validation_failed'}].slice(-10000)};}
       if(s.kind.endsWith('jsonl')&&sessions.has(`${cache}/${s.sourceId}`))partialSession=true;sources.push(next);
     }
     sources.sort((a,b)=>a.sourceId.localeCompare(b.sourceId));
     const index={schemaVersion:1,teamId:manifest.teamId,registryId:manifest.registryId,manifestRevision:manifest.revision,manifestHash:hash(manifest),collectorVersion:COLLECTOR_VERSION,rulesVersion:RULES_VERSION,
       revision:(previous?.revision??0)+1,checkedAt,statsAsOf:sources.every(s=>s.status==='fresh')?checkedAt:previous?.statsAsOf??null,
-      sources,bindings:manifest.sources.flatMap(s=>s.bindings),nextSource:(start+1)%Math.max(1,manifest.sources.length),
+      sources,bindings:manifest.sources.flatMap(s=>s.bindings),sourceScopes:manifest.sources.map(s=>({sourceId:s.sourceId,kind:s.kind,authorizedFrom:s.authorizedFrom,authorizedTo:s.authorizedTo,bindings:s.bindings.map(b=>({key:b.key,from:b.from,to:b.to,identityHash:hash([b.memberId,b.role,b.hostId,b.threadId])}))})),...(options.managedPolicy?{managedPolicy:options.managedPolicy}:{}),nextSource:(start+1)%Math.max(1,manifest.sources.length),
       readEvidence:{readBytes:budget.bytes,anchorBytes:budget.anchorBytes,wallMs:Math.round(performance.now()-budget.started)},
       phase:previous?'incremental':'initial-backfill',snapshotId:hash([manifest.teamId,manifest.revision,sources.map(s=>[s.sourceId,s.generation,s.dataRef,s.status])])};
     // Offset and data reference are one atomic commit. A crash beforehand leaves
@@ -192,8 +203,10 @@ async function refresh(manifestPath,cache,options){
     await atomicWrite(join(cache,cacheName),JSON.stringify(index));return index;
   }finally{await releaseLock();}
 }
-export function refreshStats(manifestPath,cache,options={}){
+export async function refreshStats(manifestPath,cache,options={}){
+  if(!options.managedApproved){const descriptor=await json(resolve(manifestPath),1024*1024);if(descriptor.managedPolicy){validateManifest(descriptor,dirname(resolve(manifestPath)));const {readManagedPolicy,refreshManagedMetrics}=await import('./managed-metrics.mjs'),policy=await readManagedPolicy(descriptor.managedPolicy.path);check(policy.policyId===descriptor.managedPolicy.policyId&&resolve(manifestPath)===join(policy.managedRoot,'manifest.json')&&within(policy.managedRoot,resolve(cache))&&resolve(cache)!==policy.managedRoot,'managed_policy_reference');return refreshManagedMetrics(descriptor.managedPolicy.path,{...options,cache:resolve(cache)});}}
   const key=resolve(cache);if(inflight.has(key))return inflight.get(key);
   const promise=refresh(manifestPath,key,options).catch(e=>{releaseStatsSession(key);throw e;}).finally(()=>inflight.delete(key));inflight.set(key,promise);return promise;
 }
+export async function markStatsBlocked(cache,managedPolicy,asOf){cache=resolve(cache);time(asOf);const release=await acquireLock(cache);try{const previous=await readStatsIndex(cache);check(asOf>=previous.checkedAt,'managed_stale_cutoff');const index={...previous,revision:previous.revision+1,checkedAt:asOf,phase:'managed-blocked',managedPolicy,readEvidence:{readBytes:0,anchorBytes:0,wallMs:0},snapshotId:hash([previous.snapshotId,managedPolicy,asOf])};await atomicWrite(join(cache,cacheName),JSON.stringify(index));return index;}finally{await release();}}
 export function releaseStatsSession(cache){for(const key of sessions.keys())if(key.startsWith(`${resolve(cache)}/`))sessions.delete(key);for(const [key,reader] of rootReaders)if(key.startsWith(`${resolve(cache)}/`)){rootReaders.delete(key);reader.dir.close().catch(()=>{});}}

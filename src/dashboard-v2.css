@@ -40,3 +40,6 @@ main,section,#dashboard-main{min-width:0}body{overflow-wrap:anywhere}button,inpu
 
 /* Metric tabs use aria-selected; focus-visible keeps its independent outline. */
 .metric-tabs button[aria-selected=true]{background:#233247;border-color:var(--mint);color:var(--mint)}
+
+/* Read-only source facts inherit table typography, without widening value/unit rows. */
+.source-trigger{display:block;font:inherit;line-height:inherit;border:0;background:transparent;padding:0;color:var(--muted);white-space:nowrap;text-decoration:underline;text-underline-offset:3px}.metrics-dialog.source-mode{width:min(600px,calc(100% - 32px));max-width:calc(100% - 32px);height:min(720px,calc(100dvh - 40px));max-height:calc(100dvh - 40px)}.source-facts{font-size:12px;white-space:normal;overflow-wrap:anywhere}.source-facts p{margin:12px 0}.source-facts strong{color:var(--text)}

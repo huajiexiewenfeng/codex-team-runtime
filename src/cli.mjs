@@ -151,6 +151,29 @@ export async function run(args,output=console.log) {
    await exportTaskEvaluation(resolve(a[0]),resolve(a[1]));
    output(`Read-only evaluation candidates: ${resolve(a[1],'evaluation.md')}`);break;
   }
+  case 'stats-managed-plan': {
+   if(a.length!==3)throw new Error('stats-managed-plan <state.json> <authorized-scope.json> <new-plan.json>');const {planManagedMetrics}=await import('./managed-metrics.mjs');const plan=await planManagedMetrics(a[0],await json(a[1]));if([resolve(a[0]),resolve(a[1]),resolve(plan.policy.registryPath)].includes(resolve(a[2])))throw new Error('managed_plan_path_collision');await atomicWrite(resolve(a[2]),JSON.stringify(plan,null,2)+'\n',true);output(JSON.stringify({planId:plan.planId,teamId:plan.policy.teamId,policyPath:join(plan.policy.managedRoot,'policy.json')}));break;
+  }
+  case 'stats-managed-apply': {if(a.length!==1)throw new Error('stats-managed-apply <reviewed-plan.json>');const {applyManagedMetrics}=await import('./managed-metrics.mjs');output(JSON.stringify(await applyManagedMetrics(await json(a[0]))));break;}
+  case 'stats-managed-ensure': {if(a.length<1||a.length>2)throw new Error('stats-managed-ensure <policy.json> [asOf]');const {ensureManagedMetrics}=await import('./managed-metrics.mjs');const result=await ensureManagedMetrics(a[0],a[1]?{asOf:a[1]}:{});output(JSON.stringify({changed:result.changed,manifestPath:result.manifestPath,cache:result.cache,journal:result.journal,policy:result.summary}));break;}
+  case 'stats-managed-refresh': {if(a.length<1||a.length>2)throw new Error('stats-managed-refresh <policy.json> [asOf]');const {refreshManagedMetrics}=await import('./managed-metrics.mjs');output(JSON.stringify(await refreshManagedMetrics(a[0],a[1]?{asOf:a[1]}:{}),null,2));break;}
+  case 'stats-managed-revoke': {if(a.length!==1)throw new Error('stats-managed-revoke <policy.json>');const {revokeManagedMetrics}=await import('./managed-metrics.mjs');output(JSON.stringify(await revokeManagedMetrics(a[0])));break;}
+  case 'stats-managed-observe': {if(a.length!==2)throw new Error('stats-managed-observe <existing-v1-observation-allowlist.json> <approved-policy-paths.json>');const {enableObservationTeams}=await import('./managed-metrics.mjs');output(JSON.stringify(await enableObservationTeams(a[0],await json(a[1]))));break;}
+  case 'stats-managed-step': {
+   if(a.length<6||a[4]!=='--')throw new Error('stats-managed-step <policy.json> <own-taskId> <stepId> <new-receipt.json> -- <executable> [args]');const {managedStepRequest,runManagedStep}=await import('./managed-metrics.mjs'),request=await managedStepRequest(a[0],a[1],a[2]),result=await runManagedStep(a[0],request,a[3],a.slice(5));output(JSON.stringify(result,null,2));return result;
+  }
+  case 'stats-managed-begin': {if(a.length!==4)throw new Error('stats-managed-begin <policy.json> <own-taskId> <stepId> <new-receipt.json>');const {managedStepRequest,beginManagedActivity}=await import('./managed-metrics.mjs');output(JSON.stringify(await beginManagedActivity(a[0],await managedStepRequest(a[0],a[1],a[2]),a[3]),null,2));break;}
+  case 'stats-managed-end': {if(a.length!==3)throw new Error('stats-managed-end <policy.json> <taskId> <receipt.json>');const {endManagedActivity}=await import('./managed-metrics.mjs');output(JSON.stringify(await endManagedActivity(a[0],a[1],a[2]),null,2));break;}
+  case 'stats-source-plan': {
+   if(a.length!==4||resolve(a[2])===resolve(a[3]))throw new Error('stats-source-plan <state.json> <manifest.json> <explicit-candidates.json> <new-plan.json>');
+   const {planSources,writeSourcePlan}=await import('./source-onboarding.mjs');const plan=await planSources(a[0],a[1],await json(a[2]));await writeSourcePlan(a[3],plan);output(JSON.stringify({planId:plan.planId,revision:plan.after.revision,sourceCount:plan.after.sources.length,planPath:resolve(a[3])}));break;
+  }
+  case 'stats-source-apply': {
+   if(a.length!==3)throw new Error('stats-source-apply <state.json> <manifest.json> <reviewed-plan.json>');const {applySources}=await import('./source-onboarding.mjs');output(JSON.stringify(await applySources(a[0],a[1],await json(a[2]))));break;
+  }
+  case 'stats-source-status': {
+   if(a.length<2||a.length>3)throw new Error('stats-source-status <state.json> <cache-directory> [window-query.json]');const {querySourceStatus}=await import('./stats-query.mjs');const state=await readState(a[0]);const {readStatsIndex}=await import('./stats-collector.mjs');const index=await readStatsIndex(resolve(a[1]));if(index.teamId!==state.team.id)throw new Error('source_team_mismatch');output(JSON.stringify(await querySourceStatus(resolve(a[1]),state.members,a[2]?await json(a[2]):{}),null,2));break;
+  }
   case 'stats-refresh': {
    if(a.length<2||a.length>3)throw new Error('stats-refresh <verified-manifest.json> <dedicated-cache-directory> [asOf]');
    const {refreshStats}=await import('./stats-collector.mjs');output(JSON.stringify(await refreshStats(resolve(a[0]),resolve(a[1]),a[2]?{asOf:a[2]}:{}),null,2));break;
@@ -158,6 +181,10 @@ export async function run(args,output=console.log) {
   case 'stats-query': {
    if(a.length!==2)throw new Error('stats-query <cache-directory> <query.json>');
    const {queryStats}=await import('./stats-query.mjs');output(JSON.stringify(await queryStats(resolve(a[0]),await json(a[1])),null,2));break;
+  }
+  case 'stats-step-run': {
+   if(a.length<7||a[5]!=='--')throw new Error('stats-step-run <state.json> <approved-manifest.json> <sourceId> <step-request.json> <new-workflow-receipt.json> -- <executable> [args]');
+   const {runActivityStep}=await import('./activity-workflow.mjs');const result=await runActivityStep(a[0],a[1],a[2],await json(a[3]),a[4],a.slice(6));output(JSON.stringify(result,null,2));return result;
   }
   case 'stats-activity-begin': {
    if(a.length!==4)throw new Error('stats-activity-begin <verified-manifest.json> <sourceId> <explicit-context.json> <new-receipt.json>');
@@ -240,6 +267,7 @@ export async function run(args,output=console.log) {
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{
+ if(service?.phase==='finished'&&service.businessSuccess===false){process.exitCode=1;return;}
  if(!service?.close)return;
  const stop=()=>{void service.close().catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});};
  process.once('SIGINT',stop);process.once('SIGTERM',stop);

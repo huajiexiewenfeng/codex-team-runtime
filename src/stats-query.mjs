@@ -5,6 +5,7 @@ import { localDate } from './metrics-daily.mjs';
 import { rollup } from './metrics-rollup.mjs';
 import { readStatsIndex, readStatsData } from './stats-collector.mjs';
 import { check, exact, hash, time, LIMITS, RULES_VERSION, COLLECTOR_VERSION } from './stats-contract.mjs';
+import {sourceStatus} from './source-status.mjs';
 
 const dayMs=86400000;
 // Frozen query results are held only for their existing lease lifetime. The
@@ -69,7 +70,8 @@ function redacted(row,window,roster){const span=clippedInterval(row,window),memb
 function selected(row,q){return (!q.taskId||row.taskId===q.taskId)&&(!q.roundId||row.roundId===q.roundId)&&(!q.stepId||row.stepId===q.stepId)&&(!q.memberId||row.memberId===q.memberId)&&(!q.memberBindingKey||row.bindingKey===q.memberBindingKey)&&(!q.sourceId||row.sourceId===q.sourceId)&&(!q.series||row.series===q.series)&&(!q.assurance||row.assurance===q.assurance)&&(!q.status||row.status===q.status);}
 function inWindow(row,w){const at=row.at??row.startAt??row.endAt;return !!at&&at<=w.cutoffAtInclusive&&(clippedInterval(row,w)!==null||responseSpan(row,w)!==null||[row.at,row.startAt,row.responseAt,row.completedAt].some(t=>recordPointInWindow(row,t,w)));}
 async function prepareRecords(cache,index){
-  const documents=(await readStatsData(cache,index)).map(d=>({sourceId:d.source.sourceId,rows:d.rows,metadata:d.metadata}));let records=documents.flatMap(d=>d.rows);
+  const scopes=new Map((index.sourceScopes??[]).map(s=>[s.sourceId,s]));
+  const documents=(await readStatsData(cache,index)).map(d=>({sourceId:d.source.sourceId,rows:d.rows.map(row=>{const scope=scopes.get(d.source.sourceId),binding=scope?.bindings.find(b=>b.key===row.bindingKey);if(!scope)return row;const from=[row.authorizedFrom,scope.authorizedFrom,binding?.from].filter(Boolean).sort().at(-1),to=[row.authorizedTo,scope.authorizedTo,binding?.to].filter(Boolean).sort().at(0);return {...row,authorizedFrom:from,authorizedTo:to,epochEnd:binding?.to??row.epochEnd};}),metadata:d.metadata}));let records=documents.flatMap(d=>d.rows);
   // Same native event in two approved files cannot silently double the total.
   // Different MCP series remain independent. Conflicting IDs fail closed.
   const seen=new Map();records=records.filter(r=>{const key=hash([r.kind,r.series,r.hostId,r.threadId,r.id]),before=seen.get(key);const clean={...r,sourceId:null};if(before){check(hash(before)===hash(clean),'cross_source_identity_conflict');return false;}seen.set(key,clean);return true;});
@@ -155,7 +157,27 @@ export async function queryStats(cache,input={}, {now=Date.now(),profile}={}){
     else{page=Math.floor(position/q.pageSize)+1;location={targetId:input.targetId,page,indexInPage:position%q.pageSize,matchesCurrentFilters:true,targetState:'present'};}}
   const pageCount=Math.max(1,Math.ceil(rows.length/q.pageSize));page=Math.min(page,pageCount);
   const result={schemaVersion:2,teamId:index.teamId,rulesVersion:RULES_VERSION,queryHash:hash(q),querySnapshotId:lease.snapshotId,baseSnapshotId:lease.baseSnapshotId??null,snapshotExpiresAt:new Date(lease.expiresAt).toISOString(),checkedAt:new Date(now).toISOString(),statsAsOf:index.statsAsOf,window:q.window,
-    versions:{sourceManifestRevision:index.manifestRevision,collectorVersion:index.collectorVersion,statsRevision:index.revision},freshness:{stats:index.sources.every(s=>s.status==='fresh')?'partial':index.sources.some(s=>s.status==='backfilling')?'backfilling':'stale',coverageNotProven:true},coverage,
+    versions:{sourceManifestRevision:index.manifestRevision,collectorVersion:index.collectorVersion,statsRevision:index.revision},freshness:{stats:index.managedPolicy&&index.managedPolicy.status!=='active'?'stale':index.sources.every(s=>s.status==='fresh')?'partial':index.sources.some(s=>s.status==='backfilling')?'backfilling':'stale',coverageNotProven:true},coverage,...(index.managedPolicy?{managedPolicy:index.managedPolicy}:{}),
     data:{rows:rows.slice((page-1)*q.pageSize,page*q.pageSize),total:rows.length,page,pageSize:q.pageSize,pageCount,sort:q.sort,direction:q.direction,summary:totals,historicalAggregates:aggregates,...(location?{location}:{})}};
   check(Buffer.byteLength(JSON.stringify(result))<=LIMITS.responseBytes,'stats_response_limit');return result;
+}
+
+export async function querySourceStatus(cache,roster,input={}, {baseSnapshotId,now=Date.now()}={}){
+  exact(input,['preset','from','to'],[]);const index=baseSnapshotId?(await readStatsLease(cache,baseSnapshotId,{now})).index:await readStatsIndex(cache),window=canonicalWindow(input,index.checkedAt);
+  const prepared=await preparedRecords(cache,index,now,now+LIMITS.leaseMs);
+  return {checkedAt:index.checkedAt,manifestRevision:index.manifestRevision,window,rows:sourceStatus(index,roster,prepared.value.records,window,inWindow),coverageNotProven:true};
+}
+
+// Current roster summaries use all immutable records, never a page of epoch
+// aggregates. Authorization segments can share an identity; true changed
+// host/thread/role/revision histories remain in the existing binding views.
+export async function queryCurrentMemberSummaries(cache,roster,input={}, {baseSnapshotId,now=Date.now()}={}){
+  exact(input,['preset','from','to'],[]);check(roster.length<=50,'bounded_budget_busy');
+  const index=baseSnapshotId?(await readStatsLease(cache,baseSnapshotId,{now})).index:await readStatsIndex(cache),window=canonicalWindow(input,index.checkedAt);
+  const prepared=await preparedRecords(cache,index,now,now+LIMITS.leaseMs),bindings=[...new Map(index.bindings.map(b=>[b.key,b])).values()],keysToMember=new Map(),groups=new Map();
+  const rows=roster.map(m=>{const identityHash=m.bindingHash??null,matching=bindings.filter(b=>b.memberId===m.id&&hash([b.memberId,b.role,b.hostId,b.threadId])===identityHash),verified=index.managedPolicy?.currentBindings?.find(b=>b.memberId===m.id&&b.identityHash===identityHash),revisions=new Set(matching.map(b=>b.bindingRevision)),revision=verified?.bindingRevision??(revisions.size===1?matching[0].bindingRevision:null);
+    const eligible=revision===null?[]:matching.filter(b=>b.bindingRevision===revision&&b.from<=window.cutoffAtInclusive&&b.to>window.startAt);for(const b of eligible)keysToMember.set(b.key,m.id);groups.set(m.id,[]);
+    return {memberId:m.id,name:m.name,role:m.role,identityHash,bindingRevision:revision,bindingKeys:eligible.map(b=>b.key),historicalBindingCount:bindings.filter(b=>b.memberId===m.id&&!eligible.some(e=>e.key===b.key)).length,identityBasis:verified?'current Registry tuple and revision at frozen collection':'current verified roster tuple; one unambiguous source revision',coverage:eligible.length?'partial':'sourcesPending'};});
+  for(const record of prepared.value.records){const member=keysToMember.get(record.bindingKey);if(member&&inWindow(record,window))groups.get(member).push(record);}
+  return rows.map(r=>({...r,time:summary(groups.get(r.memberId),window)}));
 }

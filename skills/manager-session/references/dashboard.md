@@ -3,6 +3,17 @@
 Use for either team Dashboard, its identity, freshness or a stale existing page.
 Plain status/history reads do not start a service.
 
+For new-member or missing-metric source questions, use the trusted Runtime's
+`docs/dashboard-stats.md` source-status/plan/apply workflow. Reconcile current
+Registry/state against approved source configuration, actual observations and
+read/window problems independently; MCP does not prove Token input, missing is
+not zero. Keep historical epochs separate. No exact user-authorized new path means
+report the gap, not a global session scan or a source.ref lookup. Approved-grant
+reuse requires the original verified grant, not a string in an arbitrary file.
+Refresh only approved sources; explicit new paths use reviewed CAS plans. Dashboard
+remains read-only, old cache/leases say configuration unverified until a new
+approved refresh, and no scope renewal is implicit in member identity.
+
 ## Explicit task and step recording
 
 When authorized step-duration recording is requested, follow
@@ -11,6 +22,18 @@ activity source and `stats-activity-begin` / `stats-activity-end` receipt comman
 these record worker/operator-declared activity, separately from machine MCP call
 timing. Do not manufacture old begin/end events, use a task owner as a step owner,
 or promise automatic tracing of every Agent tool. Missing end remains unknown.
+
+For an authorized formal Worker command step, prefer the documented
+`stats-step-run` wrapper: current state/Registry scope + approved source + six-field
+step request + new receipt + explicit executable/args. It records a **command-step
+declared activity interval**, not complete Agent or pure working time. Preserve
+ordinary command authorization; the receipt is no permission to execute again.
+Use a distinct receipt per concurrent step or authorized retry. Finished replay
+never reruns; prepared/running interruption stays unknown and requires a new
+attempt after verifying the old process stopped. Finishing recovery uses its saved
+actual exit point, never current recovery time. Do not include approval/offline gaps
+or replace recording with extra role-read calls. Follow task-attribution.md for
+identity/source changes, failure evidence and manual cross-tool begin/end rules.
 
 Only on an already-needed role-recovery `team_context.read`, and only after tool
 discovery advertises it, an explicit known `work_context` may label the team or
@@ -91,6 +114,15 @@ For Work service CLI, credentials, Python projection and shutdown details read
 - A request to view the workbench authorizes its local read-only presentation, not new members, messages, business state mutations, public hosting, global installation or Agent timers. Native host and process permissions still apply.
 
 ## Maintain records, not hand-written HTML
+
+For an explicitly authorized continuous local policy, follow the runtime's
+`docs/continuous-metrics.md`. Bind its fixed managed manifest/cache to this same
+entry; normal foreground refresh ensures current registered members and honors
+the separate permission expiry/revocation. Carry the verified policy and own task
+ID in new handoffs and use `stats-managed-step` or real begin/end boundaries for
+actual task work. Existing busy members need no interruption or historical
+activity backfill. Read policy permission and the independent MCP recorder
+allowlist are separate owner grants. Missing records stay unknown.
 
 Manager owns coordination and independently verified review/acceptance events; Workers own authorized task observations/submission evidence and completion notifications. Record actual milestones/blockers/submissions/acceptance through the existing event contracts when they occur, rather than leaving all state in chat. Liaison reads and explains, and may operate the read-only view for the user; it never fills in Manager decisions or invents progress to make the page look fresh. Registry membership writes remain Manager-only.
 

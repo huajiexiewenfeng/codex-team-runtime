@@ -1,11 +1,71 @@
-# Dashboard U1：显式来源、增量统计与查询
+# Dashboard：显式来源、增量统计与查询
 
-本模块提供可执行的 U1 数据层，尚未接入 Dashboard HTTP/UI。旧 `metrics-*`、
+本数据层已接入团队工作台 HTTP/UI（总览、任务进度、指标统计与成员/步骤详情）。旧 `metrics-*`、
 `task-timeline`、业务 state、Registry、E03/E04 协议和现有服务保持原合同。
 `stats-refresh` 只读取 manifest 明确许可的文件，写独立缓存；不扫描全局会话、
 不沿用量记录的 `source.ref` 追溯日志、不启动服务或计时器。
 
 ## 命令与版本
+
+### 当前成员来源对账与接入
+
+`stats-source-status <trusted-state.json> <owned-cache> [window-query.json]` 通过当前
+Registry/state 投影核对当前成员与批准来源，分别列出配置、实际记录、读取/范围问题。
+window-query 只含 preset/from/to，与统计窗口语义一致。无记录不是零，有 MCP 不证明
+Token 有记录。已有观测可以同时存在读取异常、授权过期或窗口不足；数值不因此丢掉。
+已退出成员不出现在当前对账，旧身份/role epoch的统计仍保留在历史查询中。
+核对只证明 member/role/host/thread 元组与当前台账一致，不证明历史 epoch 连续性。
+完整覆盖始终未证明；coverageAssertions 的原声明也不能替代实际记录。
+
+collector 新刷新保存可选净化 sourceScopes（ID、授权窗、绑定key/范围/identity hash，
+无路径），版本/原cache规则保持。旧cache/旧lease缺该字段时显示“配置待核对”，
+不借最新manifest覆盖旧snapshot。只有按原批准manifest刷新得到的新快照才具有新配置证据。
+Dashboard短标记可展开配置/记录/问题与操作说明，证据ID/时间是次级内容；网页只读。
+
+最小接入流程：
+
+```powershell
+node src/cli.mjs stats-source-plan trusted-state.json approved-manifest.json explicit-candidates.json new-plan.json
+# 审阅plan中的范围、身份、原manifest hash与完整after描述；原任务授权已明确时无需新增审批仪式。
+node src/cli.mjs stats-source-apply trusted-state.json approved-manifest.json new-plan.json
+node src/cli.mjs stats-refresh approved-manifest.json owned-cache
+```
+
+explicit-candidates.json 示例（替换为用户明确提供且有有效读取授权的精确路径）：
+
+```json
+{
+  "authorizationRef":"原用户/任务授权证据",
+  "candidates":[{
+    "mode":"codex-jsonl","path":"明确候选.jsonl","memberId":"当前成员ID",
+    "from":"now","authorizedTo":"2026-10-07T00:00:00.000Z"
+  }]
+}
+```
+
+仅有Registry身份不授予读日志权限；authorizationRef只是操作者声明，程序不能认证
+外部grant。调用前仍须确认本次用户授权的精确路径/用途/范围。程序只投影最多64KiB
+首行session identity，不保留正文，未知/错thread/team拒绝。from=now使用计划校验时刻，
+或明确未来UTC，不借当前binding回填历史；新binding是注明依据的operator-scoped epoch，
+不是伪称Registry原生revision。历史token元数据即使为counter解析被读取，早于授权窗的
+记录也不会贡献或归给当前绑定。source选择默认无任务关联，不按当前owner推断。
+
+已核验的精确来源或TC-root可复用：候选改为
+`{"mode":"approved-source","grantManifest":"已获准且经核验的manifest.json","sourceId":"原sourceId"}`。
+这个输入必须来自有效既有grant；任意文件内的authorizationRef字符串不是访问证明。
+复用保留原描述、binding/历史epoch/授权窗，只检查确切文件/目录元数据，不枚举未知根，
+不沿source.ref找日志。没有新成员日志的明确路径时，报告缺口给所有者，不能猜测/全局扫描。
+
+source ID和物理路径对账；大小写/正常Windows路径别名规范化，符号链接/junction拒绝，
+硬链接/同物理文件不添加第二源。同源重复from=now请求只在完整描述（包括绑定、原范围、
+截止、证据）仍一致时保留原起点/epoch no-op；改变截止/绑定/证据明确冲突，不暗中扩权。
+复用原plan也幂等；plan锚定state/Registry版本和manifest内容hash。apply使用协作文件锁、
+重新校验和临提交核对，stale/并发busy明确失败。所有manifest写者应遵守同一锁；这不是
+宿主ACL，也不能保证不合作外部写者的极小竞态。历史来源只追加保留，scope变更由所有者
+另行核验完整授权描述，本最小接入器不会自动续期或覆盖原grant。
+
+已批准源的append/同路径轮转继续由collector处理；旧代替换与last-good诊断保留原规则。
+自动刷新不是发现新源：新路径仍要显式候选plan/apply。源读取失败与成功读取但无记录分开。
 
 ```powershell
 node src/cli.mjs stats-refresh verified-sources.json stats-cache
@@ -192,6 +252,10 @@ writer 只做声明写入与身份/scope检查，pairingVerified=false；collect
 producer 足以提供其自身耗时；没有 native Agent 全时遥测适配器，sidecar不能补造它。
 
 ## 验证与实际缺口
+
+持续本地授权、当前登记线程的定向索引、独立 TC 记录权限和正常步骤入口见
+[continuous-metrics.md](continuous-metrics.md)。策略期限与快照采集截止时间分开；
+撤销/过期保留旧值并阻止新读取，未知/缺端仍保持未知。
 
 `node --test test/stats-u1.test.mjs` 验证大行、尾行、UTF-8/转义/坏 JSON、原子提交恢复、
 旋转/截断、跨日并集、binding epoch、冲突、独立MCP来源、分页和固定快照。

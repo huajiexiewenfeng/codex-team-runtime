@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,readFile,writeFile,appendFile,rm,realpath} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,sep,basename} from 'node:path';
+import {createDashboardFixture} from '../src/dashboard-fixture.mjs';
+import {refreshStats,releaseStatsSession} from '../src/stats-collector.mjs';
+import {hash} from '../src/stats-contract.mjs';
+import {startDashboardServer} from '../src/dashboard-live.mjs';
+import {overviewMemberSummary} from '../src/dashboard-v2-client.mjs';
+const asOf='2026-10-05T06:00:00.000Z',at='2026-10-04T00:00:00.000Z',line=v=>JSON.stringify(v)+'\n';
+test('current overview rolls all 25 authorization segments before pagination, unions overlapping time and excludes true old thread/revision; frozen/UI identities stay exact',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'runtime-current-summary-')),f=await createDashboardFixture(join(root,'fixture'),{taskCount:9,stepCount:3,activityTaskCount:1,asOf}),manifest=JSON.parse(await readFile(f.manifestPath)),base=manifest.sources.find(s=>s.sourceId==='fixture-native-worker-1'),binding=base.bindings[0];
+ t.after(async()=>{releaseStatsSession(f.cache);const target=await realpath(root),parent=await realpath(tmpdir());assert.ok(target.startsWith(parent+sep)&&/^runtime-current-summary-/.test(basename(target)));await rm(target,{recursive:true,force:true,maxRetries:3});});
+ const token=(total,time=at)=>({type:'event_msg',timestamp:time,payload:{type:'token_count',info:{last_token_usage:{input_tokens:total-2,cached_input_tokens:4,output_tokens:2,reasoning_output_tokens:1,total_tokens:total},total_token_usage:{input_tokens:total-2,cached_input_tokens:4,output_tokens:2,reasoning_output_tokens:1,total_tokens:total}}}});
+ for(let n=0;n<27;n++){const old=n===25,revision=n===26,b={...binding,roleEpoch:'segment-'+n,threadId:old?'true-old-thread':binding.threadId,bindingRevision:revision?2:1},path=join(root,'segment-'+n+'.jsonl'),rows=[{type:'session_meta',payload:{id:b.threadId}},token(old?900:revision?555:12)];if(n<25)rows.push({type:'response_item',timestamp:at,payload:{type:'function_call',call_id:'call-'+n,name:'mcp__fixture__read'}},{type:'response_item',timestamp:'2026-10-04T00:00:01.000Z',payload:{type:'function_call_output',call_id:'call-'+n,output:JSON.stringify({chunk_id:'test',exit_code:0,wall_time_seconds:1})}});await writeFile(path,rows.map(line).join(''));manifest.sources.push({...base,path,sourceId:'segment-'+n,bindings:[b]});}
+ manifest.revision++;await writeFile(f.manifestPath,JSON.stringify(manifest));
+ const refresh=async()=>{let index=await refreshStats(f.manifestPath,f.cache,{asOf});index.managedPolicy={status:'active',currentBindings:[{memberId:'worker-1',identityHash:hash(['worker-1','Worker','fixture-host','fixture-thread-worker-1']),bindingRevision:1}]};index.snapshotId=hash([index.snapshotId,index.managedPolicy]);await writeFile(join(f.cache,'stats-index.json'),JSON.stringify(index));};await refresh();
+ const service=await startDashboardServer({statePath:f.statePath,teamId:f.teamId,sourceManifestPath:f.manifestPath,statsCachePath:f.cache,port:0,now:()=>Date.parse(asOf),cacheMs:0});t.after(()=>service.close());const credential=new URLSearchParams(new URL(service.url).hash.slice(1)).get('token');const get=async query=>{const r=await fetch(service.origin+'/api/v2/overview?'+query,{headers:{Authorization:'Bearer '+credential}});assert.equal(r.status,200,await r.clone().text());return r.json();};
+ const response=await get('preset=all'),row=response.data.currentMemberSummaries.find(r=>r.memberId==='worker-1');assert.equal(response.data.members.rows.length,20);assert.equal(row.bindingKeys.length,26);assert.equal(row.historicalBindingCount,2);assert.equal(row.time.token.nativeTotal.total.known,10800);assert.equal(row.time.mcp[0].calls,32);assert.equal(row.time.intervals.find(r=>r.sourceKind==='native').observedUnionMs,2800);
+ const current=await get('mode=current'),member=current.data.rows.find(m=>m.id==='worker-1');assert.equal(overviewMemberSummary(response.data,member),row);assert.equal(overviewMemberSummary(response.data,{...member,bindingHash:'changed-identity'}),null);
+ const oldBase=response.baseSnapshotId;await appendFile(join(root,'segment-0.jsonl'),line({...token(12,'2026-10-04T01:00:00.000Z'),payload:{type:'token_count',info:{last_token_usage:token(12).payload.info.last_token_usage,total_token_usage:token(24).payload.info.total_token_usage}}}));await refresh();
+ assert.equal((await get('preset=all&baseSnapshotId='+oldBase)).data.currentMemberSummaries.find(r=>r.memberId==='worker-1').time.token.nativeTotal.total.known,10800);assert.equal((await get('preset=all')).data.currentMemberSummaries.find(r=>r.memberId==='worker-1').time.token.nativeTotal.total.known,10812);
+});
