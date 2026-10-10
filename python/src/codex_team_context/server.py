@@ -176,6 +176,8 @@ def create_server(
             register_notice_tools(server, team_registry, recorder, runtime_revision, _json_result)
             from .dispatch_tools import register_dispatch_tools
             register_dispatch_tools(server, team_registry, recorder, runtime_revision, _json_result)
+            from .inbox_tools import register_inbox_tools
+            register_inbox_tools(server, team_registry, recorder, runtime_revision, _json_result)
             startup_ledger = StartupLedger(team_registry)
 
             @server.tool(

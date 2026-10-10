@@ -63,6 +63,12 @@ identity, current work and authorization before contacting any of them.
 
 ## Foreground Manager recovery
 
+For verified installed queue_first, also use the bounded
+[E05 checkpoint](manager-inbox.md) to recover factual current work and exact
+submitted/reviewing/blocked items. Same-turn compaction preserves run/generation;
+do not replace unfinished review with the last completed artifact. Unavailable
+known queue_first status is a blocker, not proof of legacy mode.
+
 After a successful role recall for foreground team continuation or known compaction,
 verify the same team's trusted state/runtime locators and integration barrier. An
 active connected Manager then reads `supervision-plan` once (operations.md), using

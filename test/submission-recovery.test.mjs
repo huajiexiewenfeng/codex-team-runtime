@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createState, evolve } from '../src/runtime.mjs';
@@ -200,6 +200,8 @@ test('fixture provenance cannot produce send claims', async t => {
 
 test('Registry projection errors and non-ready members fail closed, ready projection permits a claim', async t => {
   const x = await files(t);
+  // Keep all linked reads and the exporter on one path; Windows TEMP can use an 8.3 alias.
+  x.statePath = await realpath(x.statePath);
   const state = { ...x.state, schemaVersion: 2, registry: {
     registryId: 'registry', registryPath: join(x.directory, 'registry.json'), teamId: x.state.team.id,
     migrationId: 'migration', sourceSha256: 'a'.repeat(64), sourceVersion: x.state.version,

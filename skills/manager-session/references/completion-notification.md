@@ -30,6 +30,12 @@ bypass a denial. Do not invent a transport result for an unsent request.
 
 ## Worker completion checkpoint
 
+Only for verified installed queue_first use [E05](manager-inbox.md): durable own
+submit then exact inbox post, with no ordinary native send/E03 prepare. Failure
+retains evidence and canonical submit; never silently fall back or fabricate
+accepted. Observe/legacy retain the E03 path below. Preserve unknown/denied attempts;
+installed source alone does not prove the new contract loaded in other chats.
+
 ### E03 MCP route for an explicitly installed linked team
 
 When `team_context.notice` and `team_context.notice_status` are discovered and the

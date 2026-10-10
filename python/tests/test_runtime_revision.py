@@ -115,7 +115,12 @@ def test_installed_server_starts_and_discovers_without_observation_options(tmp_p
         if explicit is not None:
             args += ["--runtime-revision", explicit]
         async with Client(StdioServerParameters(command=sys.executable, args=args)) as client:
-            assert len((await client.list_tools()).tools) == 7
+            assert {tool.name for tool in (await client.list_tools()).tools} == {
+                "team_context.read", "team_context.manage", "team_context.startup",
+                "team_context.notice", "team_context.notice_status",
+                "team_context.dispatch", "team_context.dispatch_status",
+                "team_context.inbox", "team_context.inbox_status",
+            }
             result = await client.call_tool("team_context.read", {"host_id": "none", "thread_id": "none"})
             assert not result.is_error and json.loads(result.content[0].text) is None
     asyncio.run(scenario())

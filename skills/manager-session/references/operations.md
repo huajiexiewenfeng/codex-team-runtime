@@ -1,5 +1,9 @@
 # Foreground operations
 
+For verified installed E05 mode, use the optional [inbox contract](manager-inbox.md).
+Carry effective mode/version and unchanged original authority in handoffs; default
+legacy remains. queue_first failures never silently restore native sending.
+
 ## Identity and actor boundary
 
 For Registry-linked teams, first apply [the shared recall contract](team-context.md).

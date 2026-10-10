@@ -212,6 +212,8 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 
 - [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
 - [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)：问题、MCP 选择、恢复节点与自然召回验证。
+- [E05 Manager 收件与续办设计稿](docs/design/e05-manager-inbox-runtime.md)：U12 待评审方案，尚未实现队列接口或启用新协议。
+- [E05 源码使用契约](docs/manager-inbox.md)：U13 核心/CLI/MCP，显式启用、前台续办与失败边界；默认未启用，不代表全局安装或真实 Agent 灰度。
 - [运行层使用说明](docs/runtime-usage.md) / [MCP 接口](docs/team-context.md) / [汇报账本](docs/reporting-usage.md)。
 - [Team Metrics 使用说明](docs/team-metrics.md) / [观测设计口径](docs/design/team-metrics.md) / [消耗原因与证据链](docs/design/team-metrics-explain.md)。
 - [只读工作台设计](docs/design/dashboard.md)。

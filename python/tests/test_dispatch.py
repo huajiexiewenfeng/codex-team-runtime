@@ -64,7 +64,8 @@ def test_real_stdio_discovery_closed_schema_and_metadata(dispatch_team):
         params=StdioServerParameters(command=sys.executable,args=['-m','codex_team_context.server','serve','--registry',str(path),'--node-executable',str(NODE),'--runtime-root',str(ROOT),'--observation-root',str(observations),'--observe-team','legacy-team'])
         async with Client(params) as client:
             catalog={t.name:t for t in (await client.list_tools()).tools}
-            assert len(catalog)==7
+            assert len(catalog)==9
+            assert {'team_context.inbox', 'team_context.inbox_status'} <= catalog.keys()
             assert catalog['team_context.dispatch_status'].annotations.read_only_hint is True
             assert catalog['team_context.dispatch'].input_schema['additionalProperties'] is False
             assert (await client.call_tool('team_context.dispatch',{**request,'admission':None})).is_error

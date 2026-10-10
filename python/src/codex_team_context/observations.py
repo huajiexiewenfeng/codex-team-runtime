@@ -20,7 +20,7 @@ REASONS = (
     "onboarding", "resume", "post_compaction", "before_dispatch", "before_delivery",
     "before_review", "identity_conflict", "manual", "unknown",
 )
-_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status", "team_context.dispatch", "team_context.dispatch_status"}
+_TOOLS = {"team_context.read", "team_context.manage", "team_context.startup", "team_context.notice", "team_context.notice_status", "team_context.dispatch", "team_context.dispatch_status", "team_context.inbox", "team_context.inbox_status"}
 _OUTCOMES = {"matched", "inactive", "unmatched", "success", "error", "unexpected_error"}
 _ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")

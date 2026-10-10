@@ -7,6 +7,11 @@ description: Use when explicitly designating a session as Manager, initializing 
 
 Reading this skill does not activate a role. Status/history queries never create, message, or wake a task. This version provides executable local `start`, two-sided `attach`, Worker registration, and read-only `resume`, not an autonomous background team or persistent session hook.
 
+For a verified installed optional E05 team mode, follow
+[Manager inbox routing](references/manager-inbox.md). Default remains legacy;
+observe is shadow-only. A queue_first post failure never enables native fallback.
+Source implementation or installation alone does not refresh existing Agents.
+
 ## Model configuration and queries
 
 For model defaults, use [model configuration](references/model-configuration.md).

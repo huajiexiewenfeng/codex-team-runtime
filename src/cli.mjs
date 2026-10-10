@@ -18,6 +18,11 @@ async function exportView(state,directory,asOf,roundId) {
  return view;
 }
 export async function run(args,output=console.log) {
+ if(/^inbox-(request|post|checkpoint|claim|start-review|resolve|control|status)$/.test(args[0]??'')){
+  if(args.length!==3)throw new Error('inbox-<request|action> <trusted-state.json> <closed-request.json>');
+  const {validateInboxRequest}=await import('./manager-inbox-contract.mjs'),{inboxRuntime}=await import('./manager-inbox.mjs'),request=validateInboxRequest(await readFile(resolve(args[2]),'utf8')),action=args[0].slice(6).replace('-','_');if(action!=='request'&&request.action!==action)throw new Error('Inbox action does not match CLI entry');
+  const state=await readState(resolve(args[1])),result=await inboxRuntime({statePath:resolve(args[1]),registryPath:state.registry?.registryPath,request});output(JSON.stringify(result,null,2));if(result.status==='error')throw new Error(result.reasonCode);return result;
+ }
  const [command,...a]=args;
  const now=()=>new Date().toISOString();
  switch(command) {
