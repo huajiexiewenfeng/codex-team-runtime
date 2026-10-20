@@ -4,11 +4,12 @@ import { readFile } from 'node:fs/promises';
 
 const moduleUrl = new URL('../skills/manager-session/scripts/model-policy.mjs', import.meta.url);
 
-test('bundled policy defaults Worker, Liaison and subagent to GPT-6 Sol; preserves Manager', async () => {
+test('bundled policy defaults Worker to GPT-6.1 Sol, retains GPT-6 Sol helpers and user-selected Manager', async () => {
   const { run } = await import(moduleUrl);
   const result = await run(['show'], () => {});
-  assert.deepEqual(result.policy.defaults.worker, { model: 'gpt-6-sol', effort: 'medium' });
-  assert.deepEqual(result.policy.defaults.subagent, result.policy.defaults.worker);
+  assert.deepEqual(result.policy.defaults.worker, { model: 'gpt-6.1-sol', effort: 'medium' });
+  assert.deepEqual(result.policy.defaults.subagent, { model: 'gpt-6-sol', effort: 'medium' });
+  assert.deepEqual(result.policy.modelOrder.slice(0, 3), ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol']);
   assert.deepEqual(result.policy.defaults.manager, { model: null, effort: null });
   assert.deepEqual(result.policy.defaults.liaison, { model: 'gpt-6-sol', effort: 'medium' });
   assert.equal(result.effectiveModelVerified, false);
@@ -19,7 +20,7 @@ test('queries are read-only and resolve explicit host fields', async () => {
   const { run, defaultConfigPath } = await import(moduleUrl);
   const before = await readFile(defaultConfigPath, 'utf8');
   const worker = await run(['resolve', 'worker'], () => {});
-  assert.deepEqual(worker.hostFields, { model: 'gpt-6-sol', thinking: 'medium' });
+  assert.deepEqual(worker.hostFields, { model: 'gpt-6.1-sol', thinking: 'medium' });
   const helper = await run(['resolve', 'subagent', '--parent-model', 'gpt-6-sol'], () => {});
   assert.deepEqual(helper.hostFields, { model: 'gpt-6-sol', reasoning_effort: 'medium' });
   assert.equal(helper.ceilingAdjusted, false);
@@ -39,6 +40,9 @@ test('helper selection honors every direct-parent ceiling without lowering effor
   }
   const astra = await run(['resolve', 'subagent', '--parent-model', 'gpt-6-astra'], () => {});
   assert.equal(astra.selected.model, 'gpt-6-sol');
+  const currentWorker = await run(['resolve', 'subagent', '--parent-model', 'gpt-6.1-sol'], () => {});
+  assert.deepEqual(currentWorker.hostFields, { model: 'gpt-6-sol', reasoning_effort: 'medium' });
+  assert.equal(currentWorker.ceilingAdjusted, false);
 });
 
 test('unknown parents, roles, paths and unsupported/duplicate arguments do not silently fall back', async () => {
@@ -71,4 +75,10 @@ test('configuration validation rejects typos, unmapped models and manager overri
   custom.defaults.subagent = { model: 'gpt-5.6-terra', effort: 'high' };
   validatePolicy(custom);
   assert.deepEqual(resolvePolicy(custom, 'subagent', 'gpt-6-sol').selected, custom.defaults.subagent);
+  const higherHelper = structuredClone(policy);
+  higherHelper.defaults.subagent = { model: 'gpt-6.1-sol', effort: 'high' };
+  validatePolicy(higherHelper);
+  assert.deepEqual(resolvePolicy(higherHelper, 'subagent', 'gpt-6-sol').selected, { model: 'gpt-6-sol', effort: 'high' });
+  assert.equal(resolvePolicy(higherHelper, 'subagent', 'gpt-6-sol').ceilingAdjusted, true);
+  assert.deepEqual(resolvePolicy(higherHelper, 'subagent', 'gpt-6.1-sol').selected, higherHelper.defaults.subagent);
 });
