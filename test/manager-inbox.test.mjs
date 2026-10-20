@@ -7,6 +7,7 @@ import {createState,evolve} from '../src/runtime.mjs';
 import {inboxRuntime} from '../src/manager-inbox.mjs';
 import {validateInboxRequest,digest} from '../src/manager-inbox-contract.mjs';
 import {noticeRuntime} from '../src/notice-runtime.mjs';
+import {workerRuntime} from '../src/worker-runtime.mjs';
 import {spawn} from 'node:child_process';
 
 const at='2026-10-09T00:00:00.000Z',source={kind:'fixture',ref:'isolated E05 behavior; no native sender'},ok=r=>{assert.notEqual(r.status,'error',JSON.stringify(r));return r;};
@@ -30,6 +31,27 @@ async function fixture(t,{submitted=false}={}){
  return {root,statePath,registryPath,native,options,req,call,ledger,raw,ctl,enable,cp,post,claim,resolve,event};
 }
 const userWork=()=>({work_id:'discussion',kind:'user-work',task_ref:null,user_work_ref:'actual user discussion',authorization_ref:'original authority',step_id:'write-document',phase:'active',next_action:{kind:'write-document',target_ref:'approved artifact'},evidence_refs:[],last_effect:{operation_ref:null,status:'not-started',evidence_ref:null},continuation_revision:0});
+
+test('structured Worker submit in queue_first keeps evidence and exact inbox review without an E03 ledger',async t=>{
+ const f=await fixture(t);await f.enable();
+ const submission={taskId:'t',summary:'Fixture structured evidence',files:['src/example.mjs'],verification:[{command:'fixture check',outcome:'not-run',evidenceRef:'fixture:declared'}],artifacts:[],gaps:['fixture only']};
+ const request={action:'submit',actor_host_id:'fixture-host',actor_thread_id:'fixture-w',team_id:'team',reason:'manual',submission_id:'structured-inbox-1',submission};
+ const submitted=ok(await workerRuntime({statePath:f.statePath,registryPath:f.registryPath,request,options:f.options}));
+ assert.equal(submitted.status,'submitted');
+ assert.deepEqual((await f.raw()).events.at(-1).submission,submission);
+ assert.equal((await f.raw()).tasks[0].status,'submitted');
+ const posted=ok(await f.call(f.req('post',{message:{kind:'submission',submit_event_id:submitted.submissionId}},'w')));
+ assert.equal(posted.status,'enqueued');
+ const snapshot=await f.cp();assert.equal(snapshot.items[0].submissionId,submitted.submissionId);
+ const claim=await f.claim(snapshot);
+ const review=ok(await f.call(f.req('start_review',{run_id:'run',generation:claim.claim.generation,claim_id:claim.claim.id,expected_state_version:(await f.raw()).version})));
+ assert.equal((await f.raw()).tasks[0].status,'reviewing');
+ assert.equal((await f.resolve(claim,'settle',{decision_event_id:review.businessEventId})).reasonCode,'REVIEW_NOT_FINISHED');
+ const approval=await f.event('approve',{summary:'Fixture independent decision',evidence:['fixture:checked']});
+ ok(await f.resolve(claim,'settle',{decision_event_id:approval.id}));
+ assert.equal((await f.raw()).tasks[0].status,'approved');
+ await assert.rejects(readFile(f.statePath+'.submission-notices.json'),{code:'ENOENT'});
+});
 
 test('R-G actual child exits at six intent/business/projection boundaries; only exact ended-child token locks cleaned and original operation recovers',async t=>{
  for(const phase of ['before-review-intent','after-review-intent','before-business','after-business','before-review-projection','after-review-projection']){

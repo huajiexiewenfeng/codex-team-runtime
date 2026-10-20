@@ -36,6 +36,8 @@ retains evidence and canonical submit; never silently fall back or fabricate
 accepted. Observe/legacy retain the E03 path below. Preserve unknown/denied attempts;
 installed source alone does not prove the new contract loaded in other chats.
 
+For explicitly installed structured tools, use [structured submission](structured-submission.md) for durable evidence. Only verified legacy/observe uses its fixed host flow and the E03/CLI routes below; these are never queue_first fallbacks. Structured actionable blocker reports use `team_context.report_blocker` and do not require ordinary progress messages or Manager state writes; queue_first report delivery still follows E05 above.
+
 ### E03 MCP route for an explicitly installed linked team
 
 When `team_context.notice` and `team_context.notice_status` are discovered and the

@@ -13,6 +13,7 @@ const directTeamContextTools = new Set([
   'team_context.read', 'team_context.manage', 'team_context.startup',
   'team_context.dispatch','team_context.dispatch_status','mcp__team_context__team_context_dispatch','mcp__team_context__team_context_dispatch_status',
   'team_context.notice', 'team_context.notice_status', 'mcp__team_context__team_context_notice', 'mcp__team_context__team_context_notice_status',
+  'team_context.submit','team_context.report_blocker','team_context.progress_summary','mcp__team_context__team_context_submit','mcp__team_context__team_context_report_blocker','mcp__team_context__team_context_progress_summary',
   'mcp__team_context__team_context_read', 'mcp__team_context__team_context_manage', 'mcp__team_context__team_context_startup'
 ]);
 const fail = message => { throw new Error(message); };

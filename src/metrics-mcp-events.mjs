@@ -4,7 +4,7 @@ const fields = ['schemaVersion', 'eventId', 'startedAt', 'completedAt', 'duratio
 const roles = ['Manager', 'Liaison', 'Worker'];
 const reasons = ['onboarding', 'resume', 'post_compaction', 'before_dispatch', 'before_delivery', 'before_review', 'identity_conflict', 'manual', 'unknown'];
 const outcomes = ['matched', 'inactive', 'unmatched', 'success', 'error', 'unexpected_error'];
-const tools = ['team_context.read', 'team_context.manage', 'team_context.startup', 'team_context.notice', 'team_context.notice_status', 'team_context.dispatch', 'team_context.dispatch_status', 'team_context.inbox', 'team_context.inbox_status'];
+const tools = ['team_context.read', 'team_context.manage', 'team_context.startup', 'team_context.notice', 'team_context.notice_status', 'team_context.dispatch', 'team_context.dispatch_status', 'team_context.inbox', 'team_context.inbox_status', 'team_context.submit', 'team_context.report_blocker', 'team_context.progress_summary'];
 const idPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const errorPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -18,18 +18,18 @@ const timestamp = (value, label) => check(typeof value === 'string' && /^\d{4}-\
 const safeCount = (value, label, minimum = 0) => check(Number.isSafeInteger(value) && value >= minimum, `Invalid ${label}`);
 
 function validateEvent(event, scope) {
-  const extension=Object.hasOwn(event,'dispatch')?'dispatch':Object.hasOwn(event,'notice')?'notice':null;
+  const extension=Object.hasOwn(event,'worker')?'worker':Object.hasOwn(event,'dispatch')?'dispatch':Object.hasOwn(event,'notice')?'notice':null;
   check([1,2].includes(event.schemaVersion),'Invalid MCP event schemaVersion');
   exact(event, [...fields,...(extension?[extension]:[]),...(event.schemaVersion===2?['workContext']:[])], 'MCP event');
   if(extension){
-    check(event.tool===`team_context.${extension}`||event.tool===`team_context.${extension}_status`,`Invalid ${extension} observation tool`);
+    check(extension==='worker'?['team_context.submit','team_context.report_blocker','team_context.progress_summary'].includes(event.tool):event.tool===`team_context.${extension}`||event.tool===`team_context.${extension}_status`,`Invalid ${extension} observation tool`);
     const detail=event[extension],allowed=['action','taskId','submissionId','operationId','attemptId','reasonCode','sourceVersion','ledgerVersion','requestBytes','responseBytes'];
     check(isObject(detail)&&Object.keys(detail).every(k=>allowed.includes(k)),`Invalid ${extension} observation fields`);
     for(const [key,value] of Object.entries(detail)){
       if(['sourceVersion','ledgerVersion','requestBytes','responseBytes'].includes(key))safeCount(value,key);
       else check(typeof value==='string'&&value.length<=256&&!/[\u0000-\u001f\ud800-\udfff]/u.test(value),'Invalid observation value');
     }
-    check(['prepare','result','status',...(extension==='dispatch'?['cancel']:[])].includes(detail.action),'Invalid action');
+    check((extension==='worker'?['submit','blocker','summary']:['prepare','result','status',...(extension==='dispatch'?['cancel']:[])]).includes(detail.action),'Invalid action');
   }
   if(event.schemaVersion===2){const context=event.workContext;check(isObject(context)&&['team','task'].includes(context.scope),'Invalid work context scope');exact(context,['scope','teamId','associationSource','validation',...(context.scope==='task'?['roundId','taskId','stepId']:[])],'work context');identifier(context.teamId,'context.teamId');check(context.teamId===event.teamId,'Work context team mismatch');check(context.associationSource==='caller-declared','Invalid context association source');if(context.scope==='task')for(const key of ['roundId','taskId','stepId'])identifier(context[key],key);if(extension&&event[extension].taskId)check(context.scope==='task'&&context.taskId===event[extension].taskId,'Work context conflicts with runtime request');const proof=context.validation;exact(proof,['basis','sourceVersion','stateAsOf','validatedAt','memberId','role','hostId','threadId'],'work context validation');check(['memberId','role','hostId','threadId'].every(k=>proof[k]===event[k]),'Work context identity mismatch');check(proof.basis==='recorded-state-scope','Invalid context validation basis');safeCount(proof.sourceVersion,'sourceVersion');timestamp(proof.stateAsOf,'stateAsOf');timestamp(proof.validatedAt,'validatedAt');check(proof.stateAsOf<=proof.validatedAt&&proof.validatedAt<=event.completedAt,'Invalid context validation time');}
   check(typeof event.eventId === 'string' && uuidPattern.test(event.eventId), 'Invalid eventId');

@@ -147,3 +147,6 @@ Keep the known process/terminal identity and original full launcher link with it
 Closed rounds and completed work do not resume agents, exit roles, or cause reports. A page may remain available for reading final records; pause/close it when not needed and stop the local service for long inactivity. No page requests means no background reads and no Agent tokens. Reporting operation ledgers and native automation receipts are separate from this display service.
 
 Show the latest entry, source version/time, and any unavailable integration. Do not claim an old static page is live, a successful fetch proves recent Worker progress, or isolated browser tests have converted the user's real team.
+# Concise progress
+
+The existing snapshot includes each task's progressSummary. Read this recorded status/activity/source, submission/review and blocker scope first. Agent real-time work remains unknown. Manager/Liaison can read the same projection with team_context.progress_summary at existing checkpoints; do not add polling or ask Workers for ordinary progress dialogue.

@@ -18,6 +18,28 @@ const event = (overrides = {}) => ({
 });
 const input = records => ({ registryId: 'registry-demo', teamId: 'demo-team', sourceKind: 'fixture', records });
 
+test('structured Worker tool observations retain only bounded metadata',()=>{
+ for(const [tool,action] of [['submit','submit'],['report_blocker','blocker'],['progress_summary','summary']]){
+  const e=event({tool:'team_context.'+tool,outcome:'success',worker:{action,taskId:'t',requestBytes:200,responseBytes:300}});
+  const report=buildServerMcpReport(input([{event:e,sourceRefs:['fixture']}]),daily());assert.deepEqual(report.events[0].event.worker,e.worker);
+  assert.throws(()=>buildServerMcpReport(input([{event:{...e,worker:{...e.worker,submission:{summary:'private'}}},sourceRefs:['fixture']}]),daily()),/worker/);
+ }
+});
+
+test('v2 workContext and Worker metadata coexist without losing inbox or closed-schema checks',()=>{
+ const workContext={scope:'task',teamId:'demo-team',roundId:'r',taskId:'t',stepId:'implementation',associationSource:'caller-declared',validation:{basis:'recorded-state-scope',sourceVersion:3,stateAsOf:'2026-09-12T15:59:57.000Z',validatedAt:'2026-09-12T15:59:59.000Z',memberId:'worker-1',role:'Worker',hostId:'host-1',threadId:'thread-1'}};
+ for(const [tool,action] of [['submit','submit'],['report_blocker','blocker'],['progress_summary','summary']]){
+  const e=event({schemaVersion:2,tool:'team_context.'+tool,outcome:'success',worker:{action,taskId:'t',requestBytes:20,responseBytes:30},workContext});
+  const report=buildServerMcpReport(input([{event:e,sourceRefs:['fixture:v2-worker']}]),daily());
+  assert.deepEqual(report.events[0].event,e);
+  for(const bad of [{...e,schemaVersion:1},{...e,worker:{...e.worker,taskId:'other'}},{...e,workContext:{...workContext,validation:{...workContext.validation,threadId:'foreign'}}},{...e,notice:{action:'prepare'}},{...e,worker:{...e.worker,summary:'private'}}])assert.throws(()=>buildServerMcpReport(input([{event:bad,sourceRefs:['fixture:invalid']}]),daily()));
+ }
+ for(const tool of ['team_context.inbox','team_context.inbox_status']){
+  const e=event({schemaVersion:2,tool,outcome:'success',workContext});
+  assert.doesNotThrow(()=>buildServerMcpReport(input([{event:e,sourceRefs:['fixture:inbox']}]),daily()));
+ }
+});
+
 test('E03 observation metadata roundtrips without accepting notice bodies', () => {
   const e = event({tool:'team_context.notice',outcome:'success',notice:{action:'prepare',taskId:'t',submissionId:'s',operationId:'p',attemptId:'a',ledgerVersion:2,requestBytes:150,responseBytes:300}});
   const report = buildServerMcpReport(input([{event:e,sourceRefs:['fixture']}]),daily());

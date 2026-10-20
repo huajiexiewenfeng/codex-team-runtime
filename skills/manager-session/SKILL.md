@@ -12,6 +12,8 @@ For a verified installed optional E05 team mode, follow
 observe is shadow-only. A queue_first post failure never enables native fallback.
 Source implementation or installation alone does not refresh existing Agents.
 
+When the structured tools are explicitly installed, follow [structured submission and concise progress](references/structured-submission.md). Manager/Liaison read `team_context.progress_summary` first at existing checkpoints; do not ask Workers for ordinary progress or add polling. Workers report actionable blockers with `team_context.report_blocker`; Manager state changes remain separate. Resolve the installed inbox mode first: queue_first uses durable submit then the inbox route above; only verified legacy/observe uses the fixed authorized host flow instead of LLM planning each notification step.
+
 ## Model configuration and queries
 
 For model defaults, use [model configuration](references/model-configuration.md).

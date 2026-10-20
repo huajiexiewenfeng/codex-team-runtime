@@ -106,4 +106,4 @@ class NoticeService:
         env = os.environ.copy()
         env["CODEX_TEAM_CONTEXT_PYTHON"] = str(Path(sys.executable).resolve())
         paths = {str(self.registry.registry_path) + ".lock", str(state) + ".lock", str(state) + ".submission-notices.json.lock"}
-        return invoke_notice_process([str(node), str(adapter)], payload, env, token, paths, read_only=request["action"] == "status")
+        return invoke_notice_process([str(node), str(adapter)], payload, env, token, paths, read_only=request["action"] in {"status", "summary"})

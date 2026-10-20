@@ -115,12 +115,17 @@ def test_installed_server_starts_and_discovers_without_observation_options(tmp_p
         if explicit is not None:
             args += ["--runtime-revision", explicit]
         async with Client(StdioServerParameters(command=sys.executable, args=args)) as client:
-            assert {tool.name for tool in (await client.list_tools()).tools} == {
-                "team_context.read", "team_context.manage", "team_context.startup",
-                "team_context.notice", "team_context.notice_status",
-                "team_context.dispatch", "team_context.dispatch_status",
-                "team_context.inbox", "team_context.inbox_status",
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            assert set(tools) == {
+                'team_context.read', 'team_context.manage', 'team_context.startup',
+                'team_context.notice', 'team_context.notice_status',
+                'team_context.dispatch', 'team_context.dispatch_status',
+                'team_context.inbox', 'team_context.inbox_status',
+                'team_context.submit', 'team_context.report_blocker', 'team_context.progress_summary',
             }
+            assert tools['team_context.progress_summary'].annotations.read_only_hint is True
+            assert tools['team_context.submit'].annotations.read_only_hint is False
+            assert tools['team_context.report_blocker'].annotations.read_only_hint is False
             result = await client.call_tool("team_context.read", {"host_id": "none", "thread_id": "none"})
             assert not result.is_error and json.loads(result.content[0].text) is None
     asyncio.run(scenario())
