@@ -18,6 +18,8 @@ Skill-driven team coordination for Codex
 
 [RSI 设计](docs/design/team-rsi.md) · [任务时间线](docs/design/task-timeline.md) · [单变量优化台账](docs/optimization/team-flow-experiments.md)
 
+**[优化说明与本地观测](docs/optimization/README.md)**：最新优化状态、问题与方案、本地指标及证据边界（2026-10-26前台观察，保留10月23日基线）。下文旧基线保留原日期，最新优化状态看此入口。
+
 Dashboard U1 数据层新增 `stats-refresh` / `stats-query` 与独立 activity sidecar：显式来源、
 有界增量缓存、binding epoch、分来源耗时并集及固定快照分页。旧工作台尚未接入这些查询；
 真实完整成员工作时长仍依赖可核验输入。见 [统计采集与查询](docs/dashboard-stats.md)。
@@ -210,6 +212,7 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 
 ## 文档
 
+- [优化说明与本地观测](docs/optimization/README.md)：持续优化索引，区分已合并基础、本地候选、业务采用与待验证收益。
 - [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
 - [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)：问题、MCP 选择、恢复节点与自然召回验证。
 - [E05 Manager 收件与续办设计稿](docs/design/e05-manager-inbox-runtime.md)：U12 待评审方案，尚未实现队列接口或启用新协议。
