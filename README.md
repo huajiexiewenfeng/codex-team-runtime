@@ -10,6 +10,8 @@ Skill-driven team coordination for Codex
 
 ## 下一阶段：受控 RSI
 
+> 2026-10-29：当前个人使用场景采用 [轻量 RSI 闭环方案](docs/design/team-rsi-lightweight-20261029.md)（[流程图](docs/assets/team-rsi-lightweight-20261029.svg)）。以完整交付时间和使用体验为主、已有数据为辅助；严格 A/B 与样本齐全是可选的增强证据。下文保留早期设计记录，不代表自动 RSI 已上线。
+
 **真实任务 → Trace → Metrics → 半自动 Eval → 单项修改 → 试用对比 → 保留或回退。**
 
 用户已确认以证据驱动持续改进：每次只改变一个因素，不凭感觉修改 Skill；候选可以是规则精简、Runtime 封装或环境修复，也可以因证据不足而不修改。评估不阻塞业务交付，不自动启动定时器，不赋予生产自修改权限。
@@ -211,6 +213,8 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 不承诺永不遗忘、无限自治、强身份认证、跨主机锁、全局原子事务或固定 Token 节省比例。
 
 ## 文档
+
+- [轻量 RSI 闭环方案](docs/design/team-rsi-lightweight-20261029.md)：用户确认后的个人使用口径，含流程图、安装试用与暂停回退边界。
 
 - [优化说明与本地观测](docs/optimization/README.md)：持续优化索引，区分已合并基础、本地候选、业务采用与待验证收益。
 - [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
