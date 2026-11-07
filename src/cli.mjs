@@ -18,6 +18,18 @@ async function exportView(state,directory,asOf,roundId) {
  return view;
 }
 export async function run(args,output=console.log) {
+ if(args[0]==='manager-request') {
+  let result;
+  try {
+   const {managerRequest}=await import('./manager-operations.mjs');
+   result=args.length===3?await managerRequest({statePath:resolve(args[1]),request:await readFile(resolve(args[2]),'utf8')}):
+    {status:'error',reasonCode:'INVALID_REQUEST',field:'argv',legal:'manager-request <trusted-state.json> <closed-request.json>',effects:'none',hostActionExecuted:false,sendNow:false};
+  } catch(error) {
+   result={status:'error',reasonCode:error.code==='ERR_MODULE_NOT_FOUND'?'CAPABILITY_UNKNOWN':'INPUT_UNAVAILABLE',field:'runtime/request',
+    legal:'verify candidate package and trusted request path; do not install or switch mode automatically',effects:'none',hostActionExecuted:false,sendNow:false};
+  }
+  output(JSON.stringify(result,null,2));return result;
+ }
  if(/^inbox-(request|post|checkpoint|claim|start-review|resolve|control|status)$/.test(args[0]??'')){
   if(args.length!==3)throw new Error('inbox-<request|action> <trusted-state.json> <closed-request.json>');
   const {validateInboxRequest}=await import('./manager-inbox-contract.mjs'),{inboxRuntime}=await import('./manager-inbox.mjs'),request=validateInboxRequest(await readFile(resolve(args[2]),'utf8')),action=args[0].slice(6).replace('-','_');if(action!=='request'&&request.action!==action)throw new Error('Inbox action does not match CLI entry');

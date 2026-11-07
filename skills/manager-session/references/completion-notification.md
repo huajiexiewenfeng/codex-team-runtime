@@ -141,7 +141,7 @@ may continue within their existing scope.
 | Prepared | Report evidence/notice saved; no transport or submission implied |
 | Submitted | Original Worker's durable submission |
 | Notification delivered | Actual host acceptance at the exact Manager target |
-| Manager received | Verified `receive-submission` result, or explicit non-submit stage acknowledgement |
+| Manager received | Verified Manager receive result for the exact submission, or explicit non-submit stage acknowledgement |
 | Accepted | Manager's independent evidence check and recorded pass decision |
 
 A saved notice, claim or Worker final reply is not notification delivery. Host
@@ -224,11 +224,12 @@ See [official auto-review documentation](https://learn.chatgpt.com/docs/sandboxi
 
 On receipt, inspect the exact team/task/stage and actual artifacts in the same
 authorized review flow; an acknowledgement alone is not completion of supervision.
-For formal submissions, use own verified identity, original trusted state and
-current version with `receive-submission`, retaining duplicate/stale notice gates.
-Then independently approve or request specific rework, or state the concrete
-verification blocker. For non-submit stages, record the stage decision in the
-existing handoff/evidence; do not mark the whole task accepted or invent a stage API.
+For formal submissions, follow the [Manager supervision entry](manager-supervision.md#manager-only-named-operations-local-trial)
+with the Manager’s verified identity, original trusted state and current version.
+Receive starts review only; independently check the evidence before recording an
+explicit approve/rework decision, or report the concrete verification blocker.
+For non-submit stages, record the stage decision in the existing handoff/evidence;
+do not mark the whole task accepted or invent a stage API.
 
 When native delivery fails, authorized foreground `pending-submissions` recovery
 can find formal submissions. It is not the normal replacement for Worker notification

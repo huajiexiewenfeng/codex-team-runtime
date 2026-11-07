@@ -75,7 +75,14 @@ async function filteredWait(request, ledgerReferences) {
   out.wake = value.wake === null ? 'none' : 'unknown';
   out.nativeErrors = !Object.hasOwn(value,'errors') ? 'none'
     : Array.isArray(value.errors) && value.errors.length === 0 ? 'none' : 'present_unknown';
-  const threadStates = ['active','idle','ended'];
+  // ended is an existing wait adapter observation, not a readiness state.
+  const passiveStates = ['idle','notLoaded','systemError','ended'];
+  const activeFlags = ['waitingOnApproval','waitingOnUserInput'];
+  const knownStatus = status => object(status) && (status.type === 'active'
+    ? Array.isArray(status.activeFlags) && status.activeFlags.length <= activeFlags.length
+      && new Set(status.activeFlags).size === status.activeFlags.length
+      && status.activeFlags.every(f => activeFlags.includes(f))
+    : passiveStates.includes(status.type) && !Object.hasOwn(status,'activeFlags'));
   const turnStates = ['inProgress','completed','interrupted','failed'];
   let outputCursorSize = 0;
   for (const row of out.targets) {
@@ -88,12 +95,10 @@ async function filteredWait(request, ledgerReferences) {
       : exact.length === 0 ? 'missing_poll' : null;
     if (row.error) continue;
     const p = exact[0];
-    if (p.schemaVersion !== 1 || !object(p.thread.status)
-        || !Array.isArray(p.thread.status.activeFlags)
+    if (p.schemaVersion !== 1 || !knownStatus(p.thread.status)
         || !Number.isSafeInteger(p.revision) || p.revision < 0
         || typeof p.changed !== 'boolean') { row.error = 'unknown_poll'; continue; }
-    row.threadStatus = threadStates.includes(p.thread.status.type)
-      ? p.thread.status.type : 'unknown';
+    row.threadStatus = p.thread.status.type;
     row.revision = p.revision;
     row.changed = p.changed;
     if (p.latestTurn === null) row.turn = null;
@@ -102,6 +107,13 @@ async function filteredWait(request, ledgerReferences) {
         status:turnStates.includes(p.latestTurn.status) ? p.latestTurn.status : 'unknown',
         error:p.latestTurn.error === null ? 'none' : 'present_unknown'};
     } else row.error = 'unknown_turn';
+    if ((row.threadStatus === 'idle' || row.threadStatus === 'ended') && row.turn?.status === 'inProgress') {
+      row.threadStatus = 'unknown';
+      row.turn = null;
+      row.error = 'contradictory_poll';
+      continue;
+    }
+    if (row.turn?.status === 'unknown') row.error = 'unknown_turn';
     if (opaque(p.cursor) && outputCursorSize + p.cursor.length <= 4096) {
       row.cursor = p.cursor;
       outputCursorSize += p.cursor.length;

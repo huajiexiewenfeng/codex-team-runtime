@@ -30,6 +30,7 @@ def _server_params(registry: Path, *, pid_file: Path | None = None) -> StdioServ
     return StdioServerParameters(
         command=sys.executable,
         args=args,
+        env={"PYTHONPATH": os.environ.get("PYTHONPATH", ""), "PYTHONDONTWRITEBYTECODE": "1"},
     )
 
 
@@ -37,6 +38,64 @@ def _text_json(result):
     assert len(result.content) == 1
     assert result.content[0].type == "text"
     return json.loads(result.content[0].text)
+
+
+def test_manager_guidance_real_stdio_read_is_additive_and_role_scoped(tmp_path: Path) -> None:
+    from codex_team_context.team_registry import TeamRegistry, initialize_registry
+
+    registry = tmp_path / "registry.json"
+    initialize_registry(registry)
+    store = TeamRegistry(registry_path=registry)
+    boot = {
+        "action": "bootstrap", "operation_id": "op-bootstrap", "team_id": "team-a",
+        "team_name": "Fixture", "member_id": "manager", "name": "Manager",
+        "authorization_ref": "fixture:approved",
+    }
+    store.manage("host-manager", "thread-manager", boot)
+    for revision, role in enumerate(("Worker", "Liaison"), start=1):
+        request = {
+            "action": "register_member", "operation_id": "op-" + role,
+            "team_id": "team-a", "expected_revision": revision, "member_id": role.lower(),
+            "name": role, "role": role, "target_host_id": "host-" + role.lower(),
+            "target_thread_id": "thread-" + role.lower(), "authorization_ref": "fixture:approved",
+        }
+        if role == "Liaison":
+            request["consent_ref"] = "fixture:consent"
+        store.manage("host-manager", "thread-manager", request)
+    value = json.loads(registry.read_text(encoding="utf-8"))
+    team = value["teams"][0]
+    expected = {m["role"]: store._capsule(value, team, m) for m in team["members"]}
+    before = (registry.read_bytes(), registry.stat().st_mtime_ns)
+
+    async def exercise() -> None:
+        async with Client(_server_params(registry), mode="legacy") as client:
+            for role, capsule in expected.items():
+                binding = capsule["member"]["binding"]
+                response = await client.call_tool("team_context.read", {
+                    "host_id": binding["hostId"], "thread_id": binding["threadId"],
+                    "reason": "post_compaction",
+                })
+                assert response.is_error is False
+                actual = _text_json(response)
+                if role == "Manager":
+                    guidance = actual.pop("managerGuidance")
+                    assert guidance["revision"] == 1
+                    assert "before output" in " ".join(guidance["steps"])
+                else:
+                    assert "managerGuidance" not in actual
+                    assert response.content[0].text == json.dumps(
+                        capsule, ensure_ascii=False, separators=(",", ":")
+                    )
+                assert actual == capsule
+            unknown = await client.call_tool("team_context.read", {
+                "host_id": "host-unknown", "thread_id": "thread-unknown",
+            })
+            assert unknown.is_error is False and unknown.content[0].text == "null"
+            replay = await _manage(client, ("host-manager", "thread-manager"), boot)
+            assert "managerGuidance" not in _text_json(replay)
+
+    asyncio.run(exercise())
+    assert (registry.read_bytes(), registry.stat().st_mtime_ns) == before
 
 
 def _manage(client: Client, actor: tuple[str, str], request: object):

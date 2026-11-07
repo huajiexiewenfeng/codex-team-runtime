@@ -24,6 +24,33 @@ _ACTIVE_ROLES = {"Worker", "Liaison"}
 _LIFECYCLES = {"active", "exited"}
 _ONBOARDING = {"pending", "ready"}
 
+# Read-only Manager reminder, independent of policy/onboarding receipt revisions.
+_MANAGER_GUIDANCE_REVISION = 1
+_MANAGER_GUIDANCE_STEPS = (
+    "At existing authorized checkpoints (including pre-dispatch identity/idle checks, "
+    "supervision and acceptance), project all native status/identity/idle results to "
+    "necessary metadata before output; never print raw results or Worker bodies.",
+    "For wait_threads use scripts/functions-exec-wait-template.js relative to the "
+    "manager-session Skill directory: one wait then whitelist projection then "
+    "compact text in functions.exec. Preserve exact identities/cursors and completion "
+    "detection for executing/rework tasks; no extra polling/timers.",
+    "Ordinary progress: progress_summary with exact task_id; omit task_id only for a "
+    "user-requested explicit team overview. Locate pending work via existing "
+    "supervision-plan.taskChecks/pendingSubmissions.",
+    "Acceptance: check criteria, durable submission/receipt, actual diff/artifacts, "
+    "evidence and authorized verification; do not default to reading Worker turns. "
+    "Native ended/idle or completion is not submission or approval.",
+    "Evidence first. Diagnostic turn reads require failed re-verification, contradictory "
+    "receipt/artifact/ledger evidence, insufficient blocker evidence, suspected scope/"
+    "safety violations or explicit user investigation of abnormal execution. For exact-task "
+    "ended/idle with no current submission and no active blocker report: last turn only. "
+    "Otherwise use the smallest relevant slice; includeOutputs only when needed.",
+    "Running, timeout, unknown or wait parsing failure alone never authorizes reading "
+    "turns, resending or new polling. Keep bounded unknown and existing completion "
+    "detection. Details: references/manager-supervision.md in that Skill; "
+    "no new Worker material or startup/recovery steps.",
+)
+
 _REQUEST_FIELDS = {
     "bootstrap": {
         "action", "operation_id", "team_id", "team_name", "member_id", "name",
@@ -168,7 +195,15 @@ class TeamRegistry:
             invoke_adapter(node, root, {"action": "inspect", "state": state, "statePath": team["runtime"]["statePath"]})
             self._validate_link_state(registry, team, state)
             runtime_phase = state["registry"]["phase"]
-        return self._capsule(registry, team, member, runtime_phase=runtime_phase)
+        capsule = self._capsule(registry, team, member, runtime_phase=runtime_phase)
+        if capsule["status"] == "active" and member["role"] == "Manager":
+            capsule["managerGuidance"] = {
+                "revision": _MANAGER_GUIDANCE_REVISION,
+                "scope": "Manager-only reminder; not authorization, not enforcement. "
+                         "Use existing authorized checkpoints; do not read before every tool call.",
+                "steps": list(_MANAGER_GUIDANCE_STEPS),
+            }
+        return capsule
 
     def observation_identity(self, host_id: str, thread_id: str) -> dict[str, Any] | None:
         """Return a narrow caller-declared identity projection without runtime checks."""

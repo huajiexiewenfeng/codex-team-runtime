@@ -1,5 +1,7 @@
 # 优化说明与本地观测
 
+**最新源码收口：2026-11-07。** 本次近期优化范围、兼容边界和验证结论见[主线收口说明](manager-optimization-rollup-20261107.md)。下文按日期保留历史安装与观察状态，不能把旧快照当作当前状态，也不能由合并推断收益。
+
 **最新前台观察：2026-10-26 17:10北京时间（UTC 09:10）。** 以下保留10月23日基线、10月25日观察及各自证据窗口；最新结果与用户批准合并的决定见文末[2026-10-26 合并决定与前台观察](#2026-10-26-合并决定与前台观察)。合并决定不等同于收益证明。
 
 更新日期：**2026-10-23**。本文是该日期的证据截止快照，供使用者了解优化动机、当前状态与测量限制；不是自动化台账或新的实验控制器。后续按日期追加观察和更正，保留失败记录，不覆盖历史结论。
@@ -169,3 +171,54 @@
 本次兼容性整理对照`32f0234`恢复E05 inbox/queue_first路由、Dashboard v2说明及任务卡Metrics managed policy要求，保留Results-first、Manager专用等待过滤和精确任务摘要规则。Runtime prompt、MCP接口与默认值、Worker启动及恢复要求不变。本次Worker整理步骤只修改源码与说明，不执行安装、提交、合并或push；主任务已获用户授权，将继续执行提交、合并至main及push，完成状态以后续实际回执为准。
 
 以上为Manager提供的本地观察与独立验收摘要，公开仅使用R/F/U代号，不收录实际业务路径、线程标识或日志正文；既有证据与历史失败记录继续保留。后续仍按自然任务记录行为、质量和成本证据，不为补齐样本新增任务或定时器。
+
+## 2026-10-28 Manager召回短提示候选与离线验证
+
+本批基于`f673659`实现候选，尚未安装、提交、合并或push。问题依据为Manager提供的10月27日至28日只读评审摘要：6次`team_context.read`（含`post_compaction`）仅带通用roleDuties，22次wait直接输出原生结果，且dispatch前身份/idle检查未覆盖到监督入口。本批未重新访问业务日志或台账；这些观察说明提示入口存在缺口，不证明候选已经改善采用率或成本。
+
+最小改动只在`TeamRegistry.read`既有检查成功后，为active Manager追加`managerGuidance={revision,scope,steps}`，独立guidance revision为1。短提示覆盖dispatch前身份/idle、监督及验收：所有native状态/身份/idle结果在输出前先投影；wait使用相对`manager-session` Skill目录的既有`scripts/functions-exec-wait-template.js`；普通进度精确`task_id`，只有用户明确要求团队概览可省略；验收核对标准、durable提交/receipt、实际diff/artifacts、证据及授权验证，不默认读Worker turns；保留既有诊断例外、ended/idle且无提交或有效阻塞时只读最后一轮，以及completion detection。timeout/unknown或解析失败不会自动授权读对话、重发或新增轮询。
+
+该字段是非授权的操作提醒，不是宿主强制拦截；不要求每次工具调用前重新read，也不回传整份说明或模板。共享`_capsule`、POLICY_REVISION、onboardingReceipt、ready判定、输入schema和授权不变；manage/replay、null/inactive及Worker/Liaison返回不增加该字段。未改共享Skill入口、Runtime通知prompt、工具描述、既有过滤模板、Worker逻辑或全局配置；Manager专用说明开头同步范围，不要求Worker补材料。
+
+| 离线检查 | 实际结果 | 证明边界 |
+| --- | --- | --- |
+| 测试先行 | 原实现的新增单测3失败/5通过，真实stdio新增测试因缺少managerGuidance失败；随后实现候选 | 缺失提示可被测试发现；首次测试环境缺依赖和默认临时目录权限问题已通过复用现有解释器/独立依赖及新临时fixture目录解决，未安装依赖 |
+| 受影响回归 | Registry、stdio、linked cutover、workContext和observations共112/112通过 | 包含10项新增用例；非全套Python/Node验证，不是业务采用证明 |
+| 返回兼容 | active Manager原字段不变；Worker/Liaison及inactive结果与原capsule字段和序列化内容一致，unknown仍为null | 真实stdio `tools/call team_context.read`覆盖Manager/Worker/Liaison及post_compaction；旧receipt仍可confirm_ready，guidance revision变化不使ready失效；manage/replay不含提示 |
+| 只读及链接校验 | 单次既有Registry读取之外禁止新增文件I/O/事务；linked读取保留既有state-read及adapter inspect，Registry/state字节和mtime不变，链接冲突仍拒绝 | 仅临时fixtures；不读取真实业务状态，不证明宿主强制过滤 |
+| 输出成本 | 紧凑UTF-8 JSON提示对象1819字节；包含新增字段名及逗号后每次active Manager read增加1838字节 | 是字节成本，不是Token或费用；Worker/Liaison返回未增加提示，不推断实际启动/恢复耗时为0 |
+
+测试通过进程级`PYTHONPATH`选择候选`python/src`和已有独立pytest依赖；真实stdio测试显式向子进程传递该路径，使用`PYTHONDONTWRITEBYTECODE=1`，不修改已安装MCP/Skill。仓库根目录下的验证命令如下，`$testPython`为已有可用解释器，`$freshFixtureDir`为本次全新临时fixture目录：
+
+```powershell
+& $testPython -B -m pytest -p no:cacheprovider python/tests/test_team_registry.py python/tests/test_registry_stdio.py python/tests/test_registry_cutover.py python/tests/test_work_context.py python/tests/test_observations.py -q --tb=short --basetemp $freshFixtureDir
+```
+
+残余限制：本批只交付候选和离线证据；旧进程、已安装版本及业务成员尚未获得新提示。模型是否遵守、真实native结果过滤采用率、Token/费用及Worker实际恢复成本仍为unknown，须由后续授权安装与自然任务观察分别验证。
+
+## 2026-10-28 三文件本地安装与待观察
+
+用户已授权先本地安装、保留回退版本，暂不合并，再观察两轮自然完整任务。**本次三文件安装于2026-10-28 11:46:03北京时间（UTC 03:46:03）完成**：只替换指定运行包及其companion的两份`team_registry.py`，以及Manager专用`manager-supervision.md`；没有全量同步main或Skill，也未改配置、安装元数据、RECORD、其他包文件、工具描述、共享Skill、team_policy或业务状态。候选仍基于`f673659`并保留未提交改动，本批未提交、合并或push；上一节“尚未安装”保留为候选交付时的历史状态。
+
+| 安装验证 | 实际结果 | 边界 |
+| --- | --- | --- |
+| 原版本预检与备份 | 三个原文件哈希符合授权值；与候选HEAD规范化换行后相同；保留原字节、绝对目标、前后SHA、候选HEAD/dirty信息及安装时间 | 备份与回退脚本仅本机保存；公开不列实际安装/业务路径 |
+| 隔离回退演练 | 隔离目标副本恢复旧字节；已是旧哈希时幂等跳过；后续版本和备份哈希异常均在写入前拒绝 | 未对真实安装来回切换；回退仅允许三个目标，不修改配置、不删文件、不重启 |
+| 原子替换 | 三文件逐一原子替换后哈希均与候选一致 | 文件替换不等于现有MCP进程热更新；没有停止或重启现有进程 |
+| 已安装stdio smoke | 新启动的已安装Python以`-I -B`运行真实MCP `tools/call`，不依赖候选PYTHONPATH；仅连接临时fixture Registry，不提供observation-root | 父进程与stdio子进程均核对已安装导入位置及guidance revision 1；不是业务团队采用证明 |
+| 返回与只读兼容 | Manager带guidance；Worker/Liaison原字段和序列化字节不变；未知身份为null；旧receipt在已安装实现可confirm_ready并读到ready | fixture初始化/confirm_ready仅用于测试准备；stdio read阶段Registry字节、mtime及目录内容均不变 |
+| 提示字节成本 | Manager fixture返回2455→4293字节（+1838）；Worker 1751→1751，Liaison 1662→1662 | UTF-8 JSON字节，不是Token、费用或实际恢复耗时 |
+
+正式after观察切点必须按各团队Manager**实际从新进程read取得`managerGuidance.revision=1`**的回执确定，不能使用文件安装时间、临时fixture smoke或窗口更新时间代替。本次安装步骤未联系业务成员、未读取业务日志/台账；真实团队的加载切点和有效after样本数尚未在此核对，保持unknown。
+
+后续沿用自然完整任务`startTask → approve`的两轮标准，按团队各自有效切点记录wait过滤、普通Worker对话读取、精确task摘要、独立验收，以及缺失指标和诊断例外。不同类型任务不作性能A/B；Token、费用或Worker恢复开销缺证据就保留unknown。不为凑样本新增任务，不创建定时器，不向业务成员发送规则刷新消息；安装、实际加载、自然采用、独立验收和收益仍分别记录。
+
+## 2026-10-28 通用协作入口优化方案（待确认）
+
+新增[Manager通用操作优化：方案、跨团队验收与回退](../design/manager-operations-optimization-20261028.md)。拟将入队、收取提交、记录审查决定的参数处理收敛为确定性Runtime入口，并复用已有E04/E05及固定宿主流程；Manager仍负责独立验收，Worker不新增启动、恢复或汇报步骤。
+
+方案包含15类离线验收场景、R/F/U各自两轮自然任务的观察口径，以及未知投递、在途操作和版本兼容条件下的回退办法。首批建议通过现有shell/functions.exec接入，暂不新增全局MCP工具，避免把Manager入口描述成本扩散到Worker。该选择及实施范围仍待用户确认，不是已实现能力。
+
+本轮只新增设计文档与本索引入口，不修改代码、Skill、已安装运行包、配置或团队状态，不开发、不安装、不合并或推送。当前已安装的召回提示候选继续保持；其观察样本不能抵算新方案的验收，单个团队提速也不能代替其他团队的非退化验证。
+
+- [P0 自然任务观察表](p0-observation-template.md) · [P0 监督候选交付](p0-manager-supervision-candidate-20261106.md)

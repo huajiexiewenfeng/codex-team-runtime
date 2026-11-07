@@ -64,6 +64,169 @@ def bootstrap(store):
     return store.manage("host-manager", "thread-manager", bootstrap_request())
 
 
+def test_manager_read_adds_bounded_operational_guidance_only(registry):
+    store, path = registry
+    bootstrap(store)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    team = value["teams"][0]
+    original = store._capsule(value, team, team["members"][0])
+    result = store.read("host-manager", "thread-manager")
+    guidance = result.pop("managerGuidance")
+    assert json.dumps(result, sort_keys=True) == json.dumps(original, sort_keys=True)
+    assert guidance["revision"] == 1
+    assert "not authorization" in guidance["scope"]
+    assert "not enforcement" in guidance["scope"]
+    instructions = " ".join(guidance["steps"])
+    for required in (
+        "dispatch", "identity", "idle", "project", "before output",
+        "scripts/functions-exec-wait-template.js relative to the manager-session Skill directory",
+        "exact task_id", "explicit team overview", "criteria", "diff/artifacts",
+        "authorized verification", "last turn only", "no active blocker",
+        "timeout", "unknown", "completion detection",
+    ):
+        assert required in instructions
+    assert len(json.dumps(guidance, ensure_ascii=False).encode("utf-8")) <= 2300
+    assert "managerGuidance" not in store.observation_identity("host-manager", "thread-manager")
+    guidance["steps"].clear()
+    assert store.read("host-manager", "thread-manager")["managerGuidance"]["steps"]
+
+
+@pytest.mark.parametrize("role,lifecycle", [
+    ("Worker", "active"), ("Liaison", "active"),
+    ("Worker", "exited"), ("Liaison", "exited"), ("Manager", "exited"),
+])
+def test_guidance_keeps_other_role_and_inactive_capsules_serially_identical(
+    registry, role, lifecycle
+):
+    store, path = registry
+    bootstrap(store)
+    identity = ("host-manager", "thread-manager")
+    member_id, revision = "manager", 1
+    if role != "Manager":
+        identity = ("host-member", "thread-member")
+        member_id, revision = "member", 2
+        store.manage("host-manager", "thread-manager", member_request(
+            member_id=member_id, role=role, host_id=identity[0], thread_id=identity[1],
+        ))
+    if lifecycle == "exited":
+        store.manage("host-manager", "thread-manager", {
+            "action": "exit_member", "operation_id": "op-exit", "team_id": "team-a",
+            "expected_revision": revision, "member_id": member_id,
+            "authorization_ref": "approved:exit",
+        })
+    value = json.loads(path.read_text(encoding="utf-8"))
+    team = value["teams"][0]
+    member = next(m for m in team["members"] if m["id"] == member_id)
+    original = store._capsule(value, team, member)
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    result = store.read(*identity)
+    assert "managerGuidance" not in result
+    assert json.dumps(result, sort_keys=True) == json.dumps(original, sort_keys=True)
+    assert store.read("host-unknown", "thread-unknown") is None
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+def test_guidance_preserves_old_receipt_ready_and_manage_replay(registry, monkeypatch):
+    store, path = registry
+    first = bootstrap(store)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    team = value["teams"][0]
+    original = store._capsule(value, team, team["members"][0])
+    receipt = original["onboardingReceipt"]
+    request = {
+        "action": "confirm_ready", "operation_id": "op-ready", "team_id": "team-a",
+        "expected_revision": 1, "member_id": "manager", "receipt": receipt,
+        "evidence_ref": "fixture:existing-receipt",
+    }
+    confirmed = store.manage("host-manager", "thread-manager", request)
+    assert "managerGuidance" not in first and "managerGuidance" not in confirmed
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    monkeypatch.setattr(team_registry_module, "_MANAGER_GUIDANCE_REVISION", 2)
+    current = store.read("host-manager", "thread-manager")
+    assert current["managerGuidance"]["revision"] == 2
+    assert current["policyRevision"] == original["policyRevision"]
+    assert current["onboardingReceipt"] == receipt
+    assert current["onboarding"] == {"status": "ready", "evidenceRef": "fixture:existing-receipt"}
+    assert current["dispatchAllowed"] is original["dispatchAllowed"] is False
+    assert store.manage("host-manager", "thread-manager", bootstrap_request()) == first
+    assert store.manage("host-manager", "thread-manager", request) == confirmed
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+def test_guidance_read_has_no_extra_io_or_mutation(registry, monkeypatch):
+    import builtins
+    import io
+
+    store, path = registry
+    bootstrap(store)
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    snapshot = store._store.read()
+    original = copy.deepcopy(snapshot)
+    calls = []
+
+    def existing_read():
+        calls.append("registry-read")
+        return snapshot
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unexpected extra IO or mutation")
+
+    with monkeypatch.context() as guard:
+        guard.setattr(store._store, "read", existing_read)
+        guard.setattr(store._store, "transact", forbidden)
+        guard.setattr(store, "_trusted_runtime", forbidden)
+        guard.setattr(builtins, "open", forbidden)
+        guard.setattr(io, "open", forbidden)
+        guard.setattr(team_registry_module.os, "open", forbidden)
+        result = store.read("host-manager", "thread-manager")
+    assert result["managerGuidance"]
+    assert calls == ["registry-read"]
+    assert snapshot == original
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+def test_guidance_linked_read_preserves_state_and_existing_validation(tmp_path, monkeypatch):
+    from test_registry_cutover import NODE, ROOT, adoption_request, legacy_bytes
+    import codex_team_context.runtime_link as runtime_link
+
+    registry_path, state_path = tmp_path / "registry.json", tmp_path / "state.json"
+    initialize_registry(registry_path)
+    raw = legacy_bytes()
+    state_path.write_bytes(raw)
+    store = TeamRegistry(registry_path=registry_path, node_executable=NODE, runtime_root=ROOT)
+    store.manage("fixture-host", "fixture-manager", adoption_request(state_path, raw))
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in (registry_path, state_path)]
+    value = json.loads(registry_path.read_text(encoding="utf-8"))
+    team = value["teams"][0]
+    real_read_state, real_invoke = runtime_link.read_state, runtime_link.invoke_adapter
+    calls = []
+
+    def read_state(*args):
+        calls.append("state-read")
+        return real_read_state(*args)
+
+    def invoke(*args):
+        calls.append("adapter-inspect")
+        return real_invoke(*args)
+
+    monkeypatch.setattr(runtime_link, "read_state", read_state)
+    monkeypatch.setattr(runtime_link, "invoke_adapter", invoke)
+    for member in team["members"]:
+        binding = member["binding"]
+        original = store._capsule(value, team, member, runtime_phase="active")
+        result = store.read(binding["hostId"], binding["threadId"])
+        if member["role"] == "Manager":
+            assert result.pop("managerGuidance")["revision"] == 1
+        assert json.dumps(result, sort_keys=True) == json.dumps(original, sort_keys=True)
+    assert calls == ["state-read", "adapter-inspect"] * 3
+    assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in (registry_path, state_path)] == before
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["registry"]["teamRevision"] = 99
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    assert_error("RUNTIME_LINK_MISMATCH", lambda: store.read("fixture-host", "fixture-manager"))
+
+
 def test_initialize_bootstrap_and_manager_capsule(registry):
     store, path = registry
     initial = json.loads(path.read_text(encoding="utf-8"))

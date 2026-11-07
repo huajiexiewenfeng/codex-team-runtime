@@ -9,7 +9,7 @@ const target = (n,hostId='fixture-host') => ({hostId,threadId:'fixture-'+n});
 const req = (...targets) => ({targets,timeoutMs:0});
 const poll = (t,extras={}) => ({
   schemaVersion:1,cursor:'opaque-'+t.threadId,revision:123,changed:true,
-  thread:{id:t.threadId,hostId:t.hostId,status:{type:'active',activeFlags:[sentinel]}},
+  thread:{id:t.threadId,hostId:t.hostId,status:{type:'active',activeFlags:['waitingOnApproval','waitingOnUserInput']}},
   latestTurn:{id:'turn-'+t.threadId,status:'inProgress',error:null},
   latestAssistantMessageId:sentinel,
   latestAssistantMessage:{phase:'commentary',text:sentinel},
@@ -23,7 +23,7 @@ test('observed turnCompleted wake preserves reason and exact identity only after
  const turnId='00000000-0000-4000-8000-000000000002';
  const wake={reason:'turnCompleted',turnId,threadId:a.threadId,hostId:a.hostId};
  const p=poll(a,{latestTurn:{id:turnId,status:'completed',error:null}});
- p.thread.status.type='idle';
+ p.thread.status={type:'idle'};
  const {out,calls}=await run(req(b,a),envelope({...decoded([p,poll(b)]),timedOut:false,wake}));
  assert.equal(calls.length,1);assert.deepEqual(out.wake,wake);
  assert.equal(out.timedOut,false);assert.equal(out.targets[1].turn.status,'completed');
@@ -32,7 +32,7 @@ test('observed turnCompleted wake preserves reason and exact identity only after
 
 test('wake host/thread/turn mismatch or absent/ambiguous poll stays bounded unknown',async()=>{
  const a=target(1),b=target(2),p=poll(a);
- p.thread.status.type='idle';p.latestTurn.status='completed';
+ p.thread.status={type:'idle'};p.latestTurn.status='completed';
  const wake={reason:'turnCompleted',turnId:p.latestTurn.id,threadId:a.threadId,hostId:a.hostId};
  const cases=[
   [{...wake,hostId:'foreign'},[p]],
@@ -53,7 +53,7 @@ test('wake host/thread/turn mismatch or absent/ambiguous poll stays bounded unkn
 
 test('unknown wake reason, body injection and contradictory timeout are never forwarded',async()=>{
  const a=target(1),p=poll(a);
- p.thread.status.type='idle';p.latestTurn.status='completed';
+ p.thread.status={type:'idle'};p.latestTurn.status='completed';
  const wake={reason:'turnCompleted',turnId:p.latestTurn.id,threadId:a.threadId,hostId:a.hostId};
  for(const w of [{...wake,reason:sentinel},{...wake,text:sentinel},
    {...wake,body:{text:sentinel}},{...wake,turnId:sentinel},
@@ -68,7 +68,7 @@ test('unknown wake reason, body injection and contradictory timeout are never fo
 
 test('same thread on distinct verified hosts cannot borrow another hosts completion wake',async()=>{
  const a=target(1,'host-a'),b=target(1,'host-b'),p=poll(a),q=poll(b);
- p.thread.status.type='idle';p.latestTurn.status='completed';
+ p.thread.status={type:'idle'};p.latestTurn.status='completed';
  q.latestTurn.id='host-b-turn';
  const wake={reason:'turnCompleted',turnId:p.latestTurn.id,threadId:b.threadId,hostId:b.hostId};
  const {out}=await run(req(a,b),envelope({...decoded([q,p]),timedOut:false,wake}));
@@ -109,7 +109,7 @@ test('one wait and compact projection on observed MCP polls, exact request/curso
 test('eight out-of-order targets retain identity, completion and trusted ledger reference',async()=>{
  const targets=Array.from({length:8},(_,n)=>target(n));
  const polls=targets.map(t=>poll(t)).reverse();
- polls[0].thread.status.type='idle';
+ polls[0].thread.status={type:'idle'};
  polls[0].latestTurn.status='completed';
  const refs=[{...targets[7],submissionRef:'ledger:submission-7'}];
  const {calls,out}=await run(req(...targets),envelope({...decoded(polls),timedOut:false,wake:{text:sentinel}}),refs);
@@ -184,7 +184,8 @@ test('unsupported version/status/turn stays unknown',async()=>{
  const p=poll(a);p.thread.status.type=sentinel;p.latestTurn.status=sentinel;
  const r=await run(req(a),envelope(decoded([p])));
  assert.equal(r.out.targets[0].threadStatus,'unknown');
- assert.equal(r.out.targets[0].turn.status,'unknown');
+ assert.equal(r.out.targets[0].turn,null);
+ assert.equal(r.out.targets[0].error,'unknown_poll');
  const s=await run(req(a),envelope(decoded([poll(a,{latestTurn:{text:sentinel}})])));
  assert.equal(s.out.targets[0].turn,null);
  assert.equal(s.out.targets[0].error,'unknown_turn');
@@ -232,7 +233,7 @@ test('timeout without polls does not imply idle or completion, trusted reference
 
 test('ended thread with no latest turn remains metadata, never a submission',async()=>{
  const a=target(1),p=poll(a,{latestTurn:null});
- p.thread.status.type='ended';
+ p.thread.status={type:'ended'};
  const {out}=await run(req(a),envelope({...decoded([p]),timedOut:false,wake:{reason:sentinel}}));
  assert.equal(out.targets[0].threadStatus,'ended');assert.equal(out.targets[0].turn,null);
  assert.equal(out.targets[0].submissionRef,null);assert.equal(out.wake,'unknown');
@@ -253,4 +254,33 @@ test('worst-case escaped or Unicode fields cannot silently truncate output/curso
  assert.ok(size<=14000);
  if(out.signal==='output_limit')assert.ok(out.targets.every(t=>t.cursor===null));
  else assert.ok(out.targets.every(t=>t.cursor===null||t.cursor==='字'.repeat(2048)));
+});
+
+test('passive native statuses omit activeFlags and never borrow an idle wake',async()=>{
+ const a=target(1);
+ for(const type of ['idle','notLoaded','systemError']){
+  const p=poll(a,{latestTurn:{id:'turn-1',status:'completed',error:null}});
+  p.thread.status={type,body:sentinel};
+  const wake={reason:'turnCompleted',turnId:'turn-1',...a};
+  const {out}=await run(req(a),envelope({...decoded([p]),timedOut:false,wake}));
+  assert.equal(out.targets[0].threadStatus,type);
+  assert.equal(out.targets[0].error,null);
+  assert.deepEqual(out.wake,type==='idle' ? wake : 'unknown');
+ }
+});
+
+test('malformed flags and contradictory idle never produce a reusable idle observation',async()=>{
+ const a=target(1);
+ for(const status of [null,{type:'active'},{type:'active',activeFlags:'waitingOnApproval'},
+   {type:'active',activeFlags:[{}]},{type:'active',activeFlags:[sentinel]},
+   {type:'active',activeFlags:['waitingOnApproval','waitingOnApproval']},
+   ...['idle','notLoaded','systemError'].map(type=>({type,activeFlags:[]})),{type:'idle'}]){
+  const p=poll(a);
+  p.thread.status=status;
+  const {out}=await run(req(a),envelope(decoded([p])));
+  assert.equal(out.targets[0].threadStatus,'unknown');
+  assert.equal(out.targets[0].cursor,null);
+  assert.equal(out.targets[0].error,status?.type==='idle' && !Object.hasOwn(status,'activeFlags')
+    ? 'contradictory_poll' : 'unknown_poll');
+ }
 });
