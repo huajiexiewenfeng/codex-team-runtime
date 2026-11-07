@@ -1,5 +1,7 @@
 # 原生 notLoaded 过滤与 Manager 派发前就绪候选
 
+> 状态更新（2026-11-07）：相关实现已随 `29cfbc4` 进入主线，详见[收口说明](manager-optimization-rollup-20261107.md)。下文保留原设计/交付时的状态，不代表当前仍未开发或未合并；实际部署与收益须分别核验。
+
 2026-11-06；离线候选，未安装。
 
 原过滤器把 activeFlags 设为所有状态的必填字段，状态枚举也缺少 notLoaded、systemError。基线 f673659 已有这个缺陷；P0 的监督文档拆分没有改变它。原测试把 active 改为 idle 后仍保留 activeFlags，掩盖了真实 idle 形状。候选按状态校验，只在 active 接受协议 flags；notLoaded、systemError 保留原义，既有 ended 仍只是观察。只有身份、游标、状态和轮次均匹配的 idle/completed 观察可以确认原生完成 wake；完成 wake 不代表提交或验收。

@@ -8,6 +8,23 @@ Skill-driven team coordination for Codex
 
 > 长期存在的是身份、状态与协作约定，不是永不停机的 Agent 循环。
 
+## 近期优化设计与进展
+
+**2026-11-07：近期通用协作优化已进入主线。** 完整回归 Node **719 项**、Python **270 项**通过；真实任务的采用和收益继续单独观察，不由合并或加载成功推断。
+
+| 方案 | 核心改动 | 设计入口 |
+| --- | --- | --- |
+| Manager 通用操作 | 确定性处理入队、收件、决定的时间、引用、版本与幂等 | [方案、跨团队验收与回退](docs/design/manager-operations-optimization-20261028.md) |
+| Manager 入口与召回 | 延续既有职责，保留 managerGuidance 等角色正文 | [召回方案](docs/optimization/manager-entry-recall-candidate-20261105.md) |
+| P0 监督分层 | 正常监督读短核心，细节按需加载；补交接组合回归 | [具体修改计划](docs/design/p0-implementation-plan-20261106.md) |
+| 状态过滤与 notLoaded | 正确识别原生状态；已核验同本地宿主时按需打开并复核 | [就绪方案与终态修订](docs/optimization/notloaded-readiness-candidate-20261106.md) |
+| Manager 新旧入口统一 | receive 只启动审查，独立验收后另行 decision；不自动回退旧写路径 | [独立方案与流程图](docs/design/manager-entry-unification-20261106.md) |
+| 轻量 RSI | 用真实瓶颈、小步候选和使用反馈驱动下一轮改进 | [闭环方案](docs/design/team-rsi-lightweight-20261029.md) · [流程图](docs/assets/team-rsi-lightweight-20261029.svg) |
+
+[完整优化设计索引](docs/design/optimization-designs.md) · [本批主线收口与验证](docs/optimization/manager-optimization-rollup-20261107.md) · [持续观察记录](docs/optimization/README.md)
+
+这些改动面向通用协作层，不针对打包或某个业务团队；不增加 Worker 的启动、恢复或普通进度汇报步骤。旧设计稿保留当时状态，当前源码能力与已部署版本须分别核对。
+
 ## 下一阶段：受控 RSI
 
 > 2026-10-29：当前个人使用场景采用 [轻量 RSI 闭环方案](docs/design/team-rsi-lightweight-20261029.md)（[流程图](docs/assets/team-rsi-lightweight-20261029.svg)）。以完整交付时间和使用体验为主、已有数据为辅助；严格 A/B 与样本齐全是可选的增强证据。下文保留早期设计记录，不代表自动 RSI 已上线。
@@ -16,30 +33,29 @@ Skill-driven team coordination for Codex
 
 用户已确认以证据驱动持续改进：每次只改变一个因素，不凭感觉修改 Skill；候选可以是规则精简、Runtime 封装或环境修复，也可以因证据不足而不修改。评估不阻塞业务交付，不自动启动定时器，不赋予生产自修改权限。
 
-当前已建立设计、优化台账和一个本地真实任务时间线基线；自动逐步骤采集、工作台时间线及自动实验管理**尚未实现**。下表仍保留历史架构基线，不将计划写成已上线能力。
+已有设计、优化台账、按明确来源采集的指标和工作台时间线；来源不完整时仍保留覆盖缺口。自动选题、生成候选、评估并部署的完整 RSI 闭环尚未上线。
 
 [RSI 设计](docs/design/team-rsi.md) · [任务时间线](docs/design/task-timeline.md) · [单变量优化台账](docs/optimization/team-flow-experiments.md)
 
-**[优化说明与本地观测](docs/optimization/README.md)**：最新优化状态、问题与方案、本地指标及证据边界（2026-10-26前台观察，保留10月23日基线）。下文旧基线保留原日期，最新优化状态看此入口。
+**[优化说明与本地观测](docs/optimization/README.md)**：按日期保留问题、方案、指标和失败记录；最新源码收口见 2026-11-07 说明，历史观察窗口不能代替新版实测。
 
-Dashboard U1 数据层新增 `stats-refresh` / `stats-query` 与独立 activity sidecar：显式来源、
-有界增量缓存、binding epoch、分来源耗时并集及固定快照分页。旧工作台尚未接入这些查询；
-真实完整成员工作时长仍依赖可核验输入。见 [统计采集与查询](docs/dashboard-stats.md)。
+统计层提供 `stats-refresh` / `stats-query` 与独立 activity sidecar：显式来源、有界增量缓存、binding epoch、分来源耗时并集及固定快照分页。[Dashboard v2](docs/dashboard-ui-v2.md) 提供任务、指标与时间线入口；未配置 v2 时保留旧页面行为。真实完整成员工作时长仍依赖可核验输入，见[统计采集与查询](docs/dashboard-stats.md)。
 
 ## 当前状态
 
-**2026-09-10 架构基线：核心协议已实现，进入真实使用与渐进验证。** 本文包含已在本地安装、尚未全部提交发布的 Registry cutover 增量；不能将架构图或文档提交视为同版本代码已经发布。具体接口以所用 checkout / companion 版本为准。
+**2026-11-07 源码状态：核心协作能力和近期 Manager 优化已进入主线，继续真实使用与渐进验证。** 仓库代码、全局安装、会话实际加载及团队模式分别核对；更新 README 不会自动启用功能。
 
-| 范围 | 已有能力与证据 | 仍需验证或不保证 |
+| 范围 | 已有源码能力 | 仍需验证或不保证 |
 | --- | --- | --- |
-| 业务运行层 | 持久轮次/任务、FIFO 队列、占用保护、提交与独立验收、投递恢复 | 不保证原生消息恰好一次送达，不支持已启动任务的强制抢占与重新分配 |
-| 长期角色记忆 | Python MCP + Team Registry；全员精确身份召回、Manager 登记与回执确认 | MCP 不主动触发；跨月、多次自然压缩后的召回率仍待验证 |
-| Registry 运行接入 | 本地 cutover 增量连接当前身份与 Node 业务状态，保留历史；一键升级团队两名正式成员已迁入并本人确认 | 不自动迁入其他团队，不代表所有窗口已加载新版；新版真实 Worker 完整闭环仍需测试 |
-| HTML 工作台 | 本机只读最新入口按页面请求同步 Node + Registry；保留离线快照、筛选、轮次、成员与证据 | 不派工、不唤醒 Agent；不是原生实时遥测，未自动采集 Token/费用 |
-| Team Metrics | 流式导入显式指定的 JSONL；按角色、任务和任务 × 角色统计，并下钻高消耗片段的工具、压缩与来源证据 | 不扫描目录、不刷新 Registry、不接入 live dashboard；日志字节不是输入 Token，重复候选不等于浪费 |
-| 监督与汇报 | Worker 通知、前台有界检查、汇报操作账本；旧版已有现场闭环证据 | 非常驻调度器；无人值守停报、自动收件箱及强制到期宿主接入尚未完整交付 |
+| 任务运行层 | 持久轮次/任务、FIFO、占用保护、结构化提交、独立验收和投递恢复 | 不保证原生消息恰好一次送达；不因 idle 自动释放占用 |
+| Manager 操作 | 统一 enqueue/receive/decision 入口、参数校验和幂等处理 | 不代替独立验收；未知效果先核对原操作 |
+| 长期角色记忆 | Python MCP、Team Registry、全员精确身份召回；Manager 召回保留职责与指引 | MCP 不主动触发，不保证自然召回率或模型持续遵守 |
+| 宿主就绪 | 状态过滤、限定条件下的 notLoaded 按需加载与复核 | 不等同工作授权；异常保持等待，不强制唤醒或发消息 |
+| 前台收件与续办 | E05 持久收件、检查点与领取协议 | 默认未初始化，显式启用；不是常驻调度器或自动唤醒服务 |
+| 工作台与指标 | Dashboard v2、Token/MCP 统计、任务时间线、来源覆盖与固定快照 | 依赖明确授权来源；缺失为 unknown，不把字节、历时换算为 Token 或计算时间 |
+| 持续优化 | 轻量 RSI 设计、优化台账、候选测试和回退工具 | 自动 RSI 未上线；成本和质量收益需自然任务证据 |
 
-本地安装、MCP 连接加载、成员本人恢复和自然召回成功是不同结果，不能相互替代。阶段性验证见下文，不能将旧版本测试直接当作新版全链路通过。
+本地安装、MCP 连接加载、成员本人恢复、自然采用与收益是不同结果。近期验证见[主线收口说明](docs/optimization/manager-optimization-rollup-20261107.md)，早期材料保留各自日期与验证范围。
 
 ## 总体架构
 
@@ -83,7 +99,7 @@ Dashboard U1 数据层新增 `stats-refresh` / `stats-query` 与独立 activity 
 | Worker | 在明确范围与文件所有权内实现、测试、构建或部署，提供证据并回报 | 不扩大授权，不自行更换 leader，交付前恢复自身团队身份 |
 | 临时 Subagent | 有界探索、实现或审查辅助 | 不因继承上下文成为正式成员，不冒用父任务身份 |
 
-典型沟通关系是“用户 ↔ Liaison ↔ Manager ↔ Workers”，不是强制消息总线。拆分窗口旨在减少干扰，不保证所有交互绝不打断。“已转交”“已收到”“已执行”必须分别核对；Liaison 到 Manager 的持久命令收件箱尚未实现。
+典型沟通关系是“用户 ↔ Liaison ↔ Manager ↔ Workers”，不是强制消息总线。拆分窗口旨在减少干扰，不保证所有交互绝不打断。“已转交”“已收到”“已执行”必须分别核对；前台收件与续办见 [E05 契约](docs/manager-inbox.md)，是否启用以实际团队模式为准，不能把持久入队当作已经执行。
 
 ## 长期角色记忆与召回
 
@@ -190,6 +206,8 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 
 ## 验证证据与下一步
 
+最近一次主线整合（2026-11-07，`29cfbc4`）完整回归：Node 719 项、Python 270 项全部通过，未跳过用例。详见[整合验证与限制](docs/optimization/manager-optimization-rollup-20261107.md#本次主线整合验证)。
+
 以下为架构基线记录的历史证据，不是长期效果保证；最新工作台的隔离测试方法与范围另见 [使用说明](docs/live-dashboard.md#开发验收)，不冒充真实团队迁入或成员交付证据：
 
 | 证据 | 范围 |
@@ -214,19 +232,22 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 
 ## 文档
 
+- [协作优化设计总索引](docs/design/optimization-designs.md)：近期方案、前序 E03/E04/E05、实现状态与共同验收边界。
+- [Manager 新旧入口统一](docs/design/manager-entry-unification-20261106.md)：receive/decision 流程图、三处规则修改及兼容回退。
+
 - [轻量 RSI 闭环方案](docs/design/team-rsi-lightweight-20261029.md)：用户确认后的个人使用口径，含流程图、安装试用与暂停回退边界。
 
 - [优化说明与本地观测](docs/optimization/README.md)：持续优化索引，区分已合并基础、本地候选、业务采用与待验证收益。
 - [总体架构设计](docs/design/manager-session-runtime-architecture.md)：分层、权威、全员召回、任务闭环、迁入与安全边界。
 - [长期角色记忆与召回](docs/design/long-term-role-memory-and-recall.md)：问题、MCP 选择、恢复节点与自然召回验证。
-- [E05 Manager 收件与续办设计稿](docs/design/e05-manager-inbox-runtime.md)：U12 待评审方案，尚未实现队列接口或启用新协议。
+- [E05 Manager 收件与续办设计稿](docs/design/e05-manager-inbox-runtime.md)：保留 U12 历史设计；已实现接口与启用边界以现行契约为准。
 - [E05 源码使用契约](docs/manager-inbox.md)：U13 核心/CLI/MCP，显式启用、前台续办与失败边界；默认未启用，不代表全局安装或真实 Agent 灰度。
 - [运行层使用说明](docs/runtime-usage.md) / [MCP 接口](docs/team-context.md) / [汇报账本](docs/reporting-usage.md)。
 - [Team Metrics 使用说明](docs/team-metrics.md) / [观测设计口径](docs/design/team-metrics.md) / [消耗原因与证据链](docs/design/team-metrics-explain.md)。
 - [只读工作台设计](docs/design/dashboard.md)。
 - [固件升级团队案例](docs/examples/firmware-upgrade-case-study.md)：脱敏的跨项目协作复盘，展示任务拆分、返工、验收分层与 Dashboard 指标边界。
 - [原始设计草案](docs/design/manager-session.md) / [V1 范围与验证门槛](docs/v1-scope.md)：保留阶段性设计与验收上下文。
-- 本地 cutover 补充材料：`docs/team-registry-cutover.md`、`docs/team-registry-cutover-validation.md`；尚未随本次文档提交发布。
+- [Registry cutover 说明](docs/team-registry-cutover.md) / [迁入验证](docs/team-registry-cutover-validation.md)：历史团队迁入流程与证据边界。
 
 ## License
 
