@@ -87,7 +87,9 @@ test('normal Manager supervision keeps decision boundaries in the core and route
   assert.match(guide, /No Worker\/Liaison reads, calls, fields or steps/);
   assert.match(guide, /taskChecks.*pendingSubmissions.*exact .task_id.*explicit team overview/);
   assert.match(guide, /actual diff\/artifacts.*without Worker turns/);
-  assert.match(guide, /whitelist metadata before output, never raw results or bodies/);
+  assert.match(guide, /fixed wait template\]\(\.\.\/scripts\/functions-exec-wait-template\.js\).*filter before model output/);
+  assert.match(detail, /Project only these four fields after matching the exact requested host\/thread and its unique valid poll/);
+  assert.match(detail, /extra fields\/body injection.*become bounded unknown without raw fallback/);
   assert.match(guide, /Keep executing\/rework completion discovery at existing checkpoints/);
   assert.match(guide, /exact ended\/idle with neither current submission nor active blocker, last turn only/);
   assert.match(guide, /unknown.*grants no body read, resend, redispatch, release, polling or timers/);

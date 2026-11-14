@@ -71,13 +71,19 @@ async function prepareThread(request) {
         return {error:'invalid_turn_metadata'};
       turn = {id:latest.id,status:latest.status,error:latest.error === null ? 'none' : 'present_unknown'};
     }
-    // The native wake signals a terminal turn, not business success.
+    // The native wake corroborates the poll, not business success.
     const w = value.wake;
-    if (w !== null && !(keys(w,['reason','hostId','threadId','turnId'])
-        && w.reason === 'turnCompleted' && value.timedOut === false
-        && w.hostId === target.hostId && w.threadId === target.threadId
-        && threadStatus === 'idle' && turn && terminal.includes(turn.status) && w.turnId === turn.id))
-      return {error:'contradictory_wake'};
+    if (w !== null) {
+      const exact = object(w) && value.timedOut === false
+        && w.hostId === target.hostId && w.threadId === target.threadId;
+      const terminalWake = exact && keys(w,['reason','hostId','threadId','turnId'])
+        && w.reason === 'turnCompleted' && threadStatus === 'idle'
+        && turn && terminal.includes(turn.status) && w.turnId === turn.id;
+      const inactiveWake = exact && keys(w,['reason','hostId','threadId'])
+        && w.reason === 'inactiveStatus' && threadStatus === 'notLoaded'
+        && turn?.status === 'completed' && turn.error === 'none';
+      if (!terminalWake && !inactiveWake) return {error:'contradictory_wake'};
+    }
     return {metadata:{threadStatus,turn,revision:poll.revision}};
   };
 

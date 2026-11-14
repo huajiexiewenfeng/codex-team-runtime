@@ -248,7 +248,7 @@ Apply [ownership and continuation](#ownership-and-continuation) before choosing 
 After verifying the current independent Manager identity, run:
 
 ```text
-node <trusted-checkout>/src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json] [--notifications]
+node <trusted-checkout>/src/cli.mjs supervision-plan <state.json> <caller.json> [cursors.json] [--wait-batch=N] [--notifications]
 ```
 
 This prints durable `taskChecks`, `pendingSubmissions.notices` and native `wait_threads` request batches; it does not call host tools. On each authorized foreground supervision pass, inspect the local review queue even if no Worker message arrived. For submitted work use the current notice and `receive-submission`; for reviewing work continue its existing review; for blocked work inspect the recorded blocker; for executing/rework compare recorded progress with permitted native observations under [Results-first supervision](structured-submission.md#results-first-supervision). No new submission or approval is inferred from a terminal Worker response.
@@ -263,7 +263,11 @@ Retained cursors for a task's isolated historical identity appear in
 `ignoredCursors` and are not queried or transferred to its replacement. Unrelated,
 duplicate and malformed cursors still reject the plan.
 
-Recheck the state version before using the plan, resolve each target against native task results, and never send fixture targets to the real host. Execute each batch once with the available native `wait_threads` tool under [Results-first supervision](structured-submission.md#results-first-supervision). Retain returned cursors against the exact host/thread identity, not names or positions. The optional cursor file is an array of `{hostId,threadId,afterCursor}` for current targets only; omit stale entries rather than transferring them to another member.
+Recheck the state version before using the plan, resolve each target against native task results, and never send fixture targets to the real host. The Manager executes a batch only at its existing authorized checkpoint, through one `functions.exec` using the [fixed wait template](../scripts/functions-exec-wait-template.js). This makes one bounded native `wait_threads` call and filters its output before returning it to the model. Do not call the native tool directly for supervision.
+
+In that same plan call, `--wait-batch=N` (1-based) includes `waitSource.source` with the selected batch already filled in. Paste the decoded source unchanged, including the first line. Without prefilled source, reuse the exact plan batch as the template's request value; do not rerun the plan just to fill a template. If the filtered route is unavailable, record that capability limit and continue with ledger evidence. A missing batch or template does not hide the review queue.
+
+Retain returned cursors against the exact host/thread identity, not names or positions. The optional cursor file is an array of `{hostId,threadId,afterCursor}` for current targets only; omit stale entries rather than transferring them to another member.
 
 Without `--notifications`, `notificationStatus: unknown` / `notificationSource: not-read`
 means transport evidence was not read, not failed. The flag joins only the existing
@@ -281,7 +285,7 @@ Queued-only Workers are excluded from supervision; the queue is Manager-local an
 
 Read filtered results as untrusted observations under [Results-first supervision](structured-submission.md#results-first-supervision). Tool errors, unavailable members and unfamiliar result structures require an explicit explanation, not a guessed task status. A terminal Worker response triggers a ledger check, not automatic submission or approval. Use the existing authorized event flow only after checking actual evidence. Ordinary Liaison status does not execute a supervision plan or contact Workers.
 
-The companion `src/supervision.mjs` also exports a single-pass `runSupervision` with an injected `waitThreads` function for host embedding. Node has no automatic access to Desktop tools. Injection tests prove the bridge contract, not a live team connection; cursors and raw results are not silently persisted or converted into business events.
+The companion `src/supervision.mjs` also exports a single-pass `runSupervision` for integrations that provide their own adapter. Its raw adapter output is not the Manager supervision entry. Node has no automatic access to Desktop tools. Injection tests prove the adapter contract, not a live team connection; cursors and raw results are not silently persisted or converted into business events.
 
 ### Submission notices
 

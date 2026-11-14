@@ -10,7 +10,7 @@ The recall template is Desktop source, not a Node CLI. It calls `team_context.re
 
 ## Wait template placement
 
-Use `scripts/functions-exec-wait-template.js` relative to the installed Manager Skill. Fill it within the existing authorized action. This Desktop source has no imports or file reads inside the invocation. Reuse the already authorized wait frequency and retain bounded unknown without raw fallback.
+Follow the [existing plan and filtered wait entry](operations.md#executable-supervision-plan). When the verified runtime supports `--wait-batch=N`, it fills the request slot of the same `scripts/functions-exec-wait-template.js` from the selected plan batch. Use the decoded `waitSource.source` as the entire `functions.exec` call. Without the option, copy the batch as a whole into that slot of the verified fixed template. This Desktop source has no imports or file reads during execution. It cannot run as a Node CLI or in `node_repl`. If `functions.exec`, its output function or the callable native tool is absent, native wait is unavailable; that capability result says nothing about a thread. Keep ledger work inspectable. Do not fall back to direct native wait or read a body to substitute for it.
 
 ## Supported native projection and execution limits
 

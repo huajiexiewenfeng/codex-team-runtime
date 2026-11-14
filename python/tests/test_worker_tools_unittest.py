@@ -14,6 +14,7 @@ from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
 from codex_team_context.team_registry import TeamRegistry, initialize_registry
 from codex_team_context.worker_tools import WorkerService
+from codex_team_context.observations import REASONS
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = Path(shutil.which('node'))
@@ -72,6 +73,17 @@ for(const event of [{{id:'open',type:'openRound',roundId:'r',title:'Round'}},{{i
                 self.assertTrue({'team_context.inbox','team_context.inbox_status'} <= by_name.keys())
                 self.assertTrue(by_name['team_context.progress_summary'].annotations.read_only_hint)
                 self.assertFalse(by_name['team_context.submit'].input_schema['additionalProperties'])
+                for name in ('team_context.submit','team_context.report_blocker'):
+                    schema=by_name[name].input_schema
+                    self.assertEqual(schema['properties']['reason'],{'default':'manual','title':'Reason','type':'string'})
+                    self.assertNotIn('reason',schema['required'])
+                schema=by_name['team_context.progress_summary'].input_schema
+                reason=schema['properties']['reason']
+                self.assertEqual(set(reason['enum']),set(REASONS))
+                self.assertEqual(reason['default'],'manual')
+                self.assertEqual(reason['examples'],['before_review'])
+                self.assertIn('trigger',reason['description'])
+                self.assertNotIn('reason',schema['required'])
                 attributed=await client.call_tool('team_context.read',dict(host_id='fixture-host',thread_id='fixture-worker',reason='resume',work_context=dict(scope='task',team_id='legacy-team',round_id='r',task_id='t',step_id='implementation')))
                 self.assertFalse(attributed.is_error,attributed)
                 args={k:v for k,v in self.request.items() if k!='action'}
@@ -91,12 +103,22 @@ for(const event of [{{id:'open',type:'openRound',roundId:'r',title:'Round'}},{{i
                 self.assertFalse(blocked.is_error,blocked)
                 before=self.path.read_bytes()
                 summary=await client.call_tool('team_context.progress_summary',dict(actor_host_id='fixture-host',actor_thread_id='fixture-manager',team_id='legacy-team',task_id='t'))
+                summary_args=dict(actor_host_id='fixture-host',actor_thread_id='fixture-manager',team_id='legacy-team',task_id='t')
+                explicit=await client.call_tool('team_context.progress_summary',{**summary_args,'reason':'before_review'})
+                self.assertFalse(explicit.is_error,explicit)
+                rejected=await client.call_tool('team_context.progress_summary',{**summary_args,'reason':'accepted'})
+                self.assertTrue(rejected.is_error,rejected)
+                error=rejected.content[0].text
+                self.assertIn('reason',error)
+                self.assertIn('example',error)
+                self.assertTrue(all(value in error for value in REASONS),error)
                 decoded=json.loads(summary.content[0].text)
                 self.assertEqual(decoded['scope'],'exact-task',decoded)
                 self.assertEqual(decoded['tasks'][0]['blocker']['reason'],'synthetic failure')
                 self.assertEqual(self.path.read_bytes(),before)
             events=[json.loads(p.read_text(encoding='utf-8')) for p in observations.glob('*/*.json')]
             self.assertEqual({e['worker']['action'] for e in events if 'worker' in e},{'submit','blocker','summary'})
+            self.assertCountEqual([e['reason'] for e in events if e.get('worker',{}).get('action')=='summary'],['manual','before_review'])
             context_event=next(e for e in events if 'workContext' in e)
             self.assertEqual(context_event['schemaVersion'],2)
             self.assertEqual(context_event['workContext']['taskId'],'t')
