@@ -51,6 +51,8 @@ async function filteredWait(request, ledgerReferences) {
     for (const row of result.targets) row.submissionRef = refs.get(key(row)) ?? null;
     return result;
   };
+  if (typeof tools === 'undefined' || typeof tools?.mcp__codex_app__wait_threads !== 'function')
+    return {signal:'capability_unavailable',targets:[]};
   let raw;
   try {
     raw = await tools.mcp__codex_app__wait_threads({targets,timeoutMs:request.timeoutMs});

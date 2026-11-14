@@ -1,11 +1,16 @@
 """Structured evidence tools. No native host messaging capability."""
 import json
-from typing import Any
+from typing import Annotated, Any
 from mcp.types import ToolAnnotations
-from pydantic import create_model, ConfigDict
+from pydantic import create_model, ConfigDict, Field
 from .notice import NoticeService, MAX_BYTES
 from .core import ContextError
 from .observations import observed_call, REASONS
+
+ProgressReason = Annotated[str, Field(
+    description='Caller-declared trigger; use manual for ad hoc and unknown only when uncertain.',
+    json_schema_extra={'enum': list(REASONS), 'examples': ['before_review']},
+)]
 
 def validate_worker_request(r):
     extra = {'submit': {'submission_id', 'submission'}, 'blocker': {'operation_id', 'task_id', 'blocker'}, 'summary': {'task_id'}}.get(r.get('action'))
@@ -30,6 +35,10 @@ def register_worker_tools(server, registry, recorder, runtime_revision, json_res
     service = WorkerService(registry, runtime_revision)
     def execute(r):
         if r.get('reason') not in REASONS:
+            if r['action'] == 'summary':
+                return json_result({'status':'error','reasonCode':'FIELD_INVALID','field':'reason',
+                                    'message':'reason: use a supported caller trigger',
+                                    'legal':list(REASONS),'example':'before_review','hostActionExecuted':False},is_error=True)
             return json_result({'status':'error','reasonCode':'FIELD_INVALID','field':'reason','message':'reason: expected supported notice reason','example':'manual','hostActionExecuted':False},is_error=True)
         try:
             result = observed_call(recorder, lambda: registry.observation_identity(r['actor_host_id'], r['actor_thread_id']),
@@ -50,7 +59,7 @@ def register_worker_tools(server, registry, recorder, runtime_revision, json_res
         return execute({'action':'blocker', **{k:v for k,v in locals().items() if k != 'execute'}})
 
     @server.tool(name='team_context.progress_summary', description='Read concise ledger status, activity evidence, submission, review and blockers. Agent real-time work is unknown. Read before asking Workers; no polling.', annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False))
-    def progress_summary(actor_host_id: str, actor_thread_id: str, team_id: str, reason: str = 'manual', task_id: str = None):
+    def progress_summary(actor_host_id: str, actor_thread_id: str, team_id: str, reason: ProgressReason = 'manual', task_id: str = None):
         return execute({'action':'summary', **{k:v for k,v in locals().items() if v is not None and k != 'execute'}})
 
     for name in ['team_context.submit', 'team_context.report_blocker', 'team_context.progress_summary']:

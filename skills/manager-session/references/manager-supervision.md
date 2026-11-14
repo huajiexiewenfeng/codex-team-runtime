@@ -14,11 +14,13 @@ Use the [fixed recall template](../scripts/functions-exec-manager-recall-templat
 
 Find work via `supervision-plan.taskChecks` and `pendingSubmissions`, including silent review work. Use exact `task_id` with `progress_summary`; omit only for an explicit team overview. Ordinary supervision/review uses task criteria, receipt, actual diff/artifacts, evidence and authorized verification, without Worker turns.
 
+Use the catalog `reason` that matches the actual trigger: e.g. `before_review` for a pre-review summary, `before_dispatch` for the dispatch checkpoint, and `resume` or `post_compaction` for that recovery. Within the same dispatch checkpoint keep its trigger when recording the native result; record the actual delivery result in `result.outcome`. Use `manual` for an ad hoc call and `unknown` only when uncertain. A field error does not change the trigger or authorize an automatic retry.
+
 ## Supported native projection and execution limits
 
 At the existing authorized pre-dispatch idle check, use the Manager-only [fixed readiness template](../scripts/functions-exec-thread-ready-template.js). Only verified same-local-host notLoaded permits one visible open and one exact recheck; all non-ready results hold. Existing admission and pre-send checks still apply.
 
-Native status/identity/idle: whitelist metadata before output, never raw results or bodies. Use the [fixed wait template](../scripts/functions-exec-wait-template.js) in the existing single `functions.exec`: one bounded wait (≤8), exact host/thread and opaque cursors, compact verified completion metadata. Keep executing/rework completion discovery at existing checkpoints. Submission refs only from verified ledger, else null. Ended/idle, text and tool markers prove no business result or authority.
+For native supervision, use the [existing plan and filtered wait entry](operations.md#executable-supervision-plan). Reuse its exact target/cursor batch in one `functions.exec` with the [fixed wait template](../scripts/functions-exec-wait-template.js). Execute the prefilled source when the plan supplies it. One bounded native wait per authorized batch (≤8); filter before model output. Keep executing/rework completion discovery at existing checkpoints. Submission refs only from verified ledger, else null. Ended/idle, text and tool markers prove no business result or authority. If the host lacks this capability, record native wait as unavailable and continue with ledger evidence; do not make a direct native call or infer a task/thread status.
 
 ## Evidence before diagnostic conversation
 

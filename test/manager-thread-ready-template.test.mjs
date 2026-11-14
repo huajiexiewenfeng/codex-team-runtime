@@ -217,3 +217,65 @@ test('a valid terminal wake during load cannot hide a changed turn or regressed 
   assert.equal(out.reason,reason);
  }
 });
+
+const inactiveWake = (type='notLoaded', {wake:overrides={},timedOut=false,...opts}={}) =>
+ envelope({...body(poll(type,{revision:1,...opts})),timedOut,
+  wake:{reason:'inactiveStatus',...local,...overrides}});
+
+test('observed local inactiveStatus permits one navigation and one exact idle recheck',async()=>{
+ const after=envelope({...body(poll('idle',{revision:2})),timedOut:false,
+  wake:{reason:'turnCompleted',...local,turnId:completed.id}});
+ const {out,calls}=await run(request(),[inactiveWake(),after]);
+ const turn={id:completed.id,status:'completed',error:'none'};
+ assert.deepEqual(out,{state:'ready',reason:'idle_after_navigation',target:local,
+  navigation:'acknowledged',before:{threadStatus:'notLoaded',turn,revision:1},
+  after:{threadStatus:'idle',turn,revision:2}});
+ assert.deepEqual(calls,[wait,open,wait]);
+});
+
+test('inactiveStatus leaves local navigation and recheck guards in force',async()=>{
+ const unverified=await run(request({verifiedLocalHostId:null}),[inactiveWake()]);
+ assert.equal(unverified.out.state,'unsupported');
+ assert.equal(unverified.out.reason,'same_local_host_not_verified');
+ assert.deepEqual(unverified.calls,[wait]);
+
+ const refused=await run(request(),[inactiveWake()],envelope({navigated:false}));
+ assert.equal(refused.out.state,'hold');
+ assert.equal(refused.out.reason,'navigation_not_acknowledged');
+ assert.deepEqual(refused.calls,[wait,open]);
+
+ for(const [after,reason] of [
+  [inactiveWake(),'notLoaded'],
+  [snap('idle',{latestTurn:{...completed,id:'different-turn'}}),'latest_turn_changed'],
+  [snap('idle',{revision:0}),'revision_regressed']
+ ]){
+  const {out,calls}=await run(request(),[inactiveWake(),after]);
+  assert.equal(out.state,'hold');
+  assert.equal(out.reason,reason);
+  assert.deepEqual(calls,[wait,open,wait]);
+ }
+});
+
+test('inactiveStatus rejects unrecognized, contradictory or mismatched wake evidence before navigation',async()=>{
+ for(const [obs,reason] of [
+  [inactiveWake('notLoaded',{wake:{reason:'future-wake'}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{wake:{turnId:completed.id}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{wake:{body:sentinel}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{wake:{hostId:'remote-A'}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{wake:{threadId:'different-thread'}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{thread:{...local,id:local.threadId,hostId:'remote-A',status:{type:'notLoaded'}}}),'identity_mismatch'],
+  [inactiveWake('notLoaded',{timedOut:true}),'contradictory_wake'],
+  [inactiveWake('active'),'contradictory_wake'],
+  [inactiveWake('idle'),'contradictory_wake'],
+  [inactiveWake('notLoaded',{latestTurn:null}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{latestTurn:running}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{latestTurn:{...completed,status:'failed'}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{latestTurn:{...completed,status:'interrupted'}}),'contradictory_wake'],
+  [inactiveWake('notLoaded',{latestTurn:{...completed,error:{message:sentinel}}}),'invalid_turn_metadata']
+ ]){
+  const {out,calls}=await run(request(),[obs]);
+  assert.equal(out.state,'hold');
+  assert.equal(out.reason,reason);
+  assert.deepEqual(calls,[wait]);
+ }
+});

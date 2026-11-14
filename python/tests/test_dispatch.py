@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
-from codex_team_context.dispatch import DispatchService,validate_request
+from codex_team_context.dispatch import DispatchService,validate_request,REASONS as DISPATCH_REASONS
+from codex_team_context.observations import REASONS as OBSERVATION_REASONS
 from codex_team_context.core import ContextError
 from codex_team_context.notice_process import invoke_notice_process
 from codex_team_context.team_registry import TeamRegistry,initialize_registry
@@ -61,7 +62,7 @@ def test_real_bridge_first_attempt_result_replay_and_registry_reads(dispatch_tea
 def test_real_stdio_discovery_closed_schema_and_metadata(dispatch_team):
     registry,path,state,common,request=dispatch_team;observations=path.parent/'observations'
     async def scenario():
-        params=StdioServerParameters(command=sys.executable,args=['-m','codex_team_context.server','serve','--registry',str(path),'--node-executable',str(NODE),'--runtime-root',str(ROOT),'--observation-root',str(observations),'--observe-team','legacy-team'])
+        params=StdioServerParameters(command=sys.executable,args=['-m','codex_team_context.server','serve','--registry',str(path),'--node-executable',str(NODE),'--runtime-root',str(ROOT),'--observation-root',str(observations),'--observe-team','legacy-team'],env={**os.environ,'PYTHONPATH':str(ROOT/'python/src')})
         async with Client(params) as client:
             catalog={t.name:t for t in (await client.list_tools()).tools}
             assert set(catalog) == {
@@ -73,6 +74,16 @@ def test_real_stdio_discovery_closed_schema_and_metadata(dispatch_team):
             }
             assert catalog['team_context.dispatch_status'].annotations.read_only_hint is True
             assert catalog['team_context.dispatch'].input_schema['additionalProperties'] is False
+            assert set(OBSERVATION_REASONS) == DISPATCH_REASONS
+            for name, args in [('team_context.dispatch',request),('team_context.dispatch_status',{**common,'operation_id':'p1'})]:
+                schema=catalog[name].input_schema
+                reason=schema['properties']['reason']
+                assert set(reason['enum']) == DISPATCH_REASONS and 'reason' in schema['required']
+                assert reason['examples'] == ['before_dispatch'] and 'trigger' in reason['description']
+                rejected=await client.call_tool(name,{**args,'reason':'accepted'})
+                assert rejected.is_error
+                error=rejected.content[0].text
+                assert 'reason' in error and 'example' in error and all(value in error for value in DISPATCH_REASONS)
             assert (await client.call_tool('team_context.dispatch',{**request,'admission':None})).is_error
             p=await client.call_tool('team_context.dispatch',request);assert not p.is_error,p
             status=await client.call_tool('team_context.dispatch_status',{**common,'operation_id':'p1'})

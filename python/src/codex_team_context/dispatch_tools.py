@@ -1,11 +1,16 @@
 """Closed E04 MCP input models and bounded metadata-only observations."""
 import json
-from typing import Any, Literal
-from pydantic import create_model, model_validator, ConfigDict
+from typing import Annotated, Any, Literal
+from pydantic import create_model, model_validator, ConfigDict, Field
 from mcp.types import ToolAnnotations
 from .core import ContextError
-from .dispatch import DispatchService, validate_request
+from .dispatch import DispatchService, REASONS, validate_request
 from .observations import observed_call
+
+DispatchReason = Annotated[str, Field(
+    description='Caller-declared trigger; use manual for ad hoc and unknown only when uncertain.',
+    json_schema_extra={'enum': sorted(REASONS), 'examples': ['before_dispatch']},
+)]
 
 def register_dispatch_tools(server,registry,recorder,runtime_revision,json_result):
     service=DispatchService(registry,runtime_revision)
@@ -28,13 +33,13 @@ def register_dispatch_tools(server,registry,recorder,runtime_revision,json_resul
 
     @server.tool(name='team_context.dispatch',description='Prepare one queued task, record an exact native result, or explicitly withdraw proven undelivered work. Never sends. Fresh prepare permits one authorized host call; replay and unknown results never permit resend.',
                  annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=False,openWorldHint=False))
-    def dispatch(action:Literal['prepare','result','cancel'],actor_host_id:str,actor_thread_id:str,team_id:str,round_id:str,task_id:str,worker_id:str,reason:str,operation_id:str,
+    def dispatch(action:Literal['prepare','result','cancel'],actor_host_id:str,actor_thread_id:str,team_id:str,round_id:str,task_id:str,worker_id:str,reason:DispatchReason,operation_id:str,
                  enqueue_event_id:str=None,brief_ref:str=None,admission:dict[str,Any]=None,baseline:dict[str,Any]=None,retry_of_attempt_id:str=None,attempt_id:str=None,result:dict[str,Any]=None,cancellation:dict[str,Any]=None):
         return execute({k:v for k,v in locals().items() if v is not None and k!='execute'})
 
     @server.tool(name='team_context.dispatch_status',description='Read exact dispatch operation/attempt and frozen material. No mutations, lock cleanup or host request. Latest attempt is only an unverified correlation hint.',
                  annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False))
-    def dispatch_status(actor_host_id:str,actor_thread_id:str,team_id:str,round_id:str,task_id:str,worker_id:str,reason:str,operation_id:str=None,attempt_id:str=None,include_content:bool=False):
+    def dispatch_status(actor_host_id:str,actor_thread_id:str,team_id:str,round_id:str,task_id:str,worker_id:str,reason:DispatchReason,operation_id:str=None,attempt_id:str=None,include_content:bool=False):
         return execute({'action':'status',**{k:v for k,v in locals().items() if v is not None and k!='execute'}})
 
     for name,fixed in [('team_context.dispatch',None),('team_context.dispatch_status','status')]:

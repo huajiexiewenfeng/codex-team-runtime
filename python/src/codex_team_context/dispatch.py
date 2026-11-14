@@ -16,8 +16,10 @@ def validate_request(r):
     check(isinstance(r,dict) and isinstance(r.get('action'),str) and r['action'] in EXTRA,'Unknown dispatch action')
     action=r['action']
     check(COMMON|REQUIRED[action]|{'action'} <= r.keys() <= COMMON|EXTRA[action]|{'action'},'Dispatch fields do not match action')
-    check(all(isinstance(r[k],str) and 0<len(r[k])<=256 for k in COMMON),'Invalid scope')
-    check(r['reason'] in REASONS,'Invalid reason')
+    check(all(isinstance(r[k],str) and 0<len(r[k])<=256 for k in COMMON - {'reason'}),'Invalid scope')
+    reason=r['reason']
+    check(isinstance(reason,str) and reason in REASONS,
+          f"Invalid reason: use a supported caller trigger ({', '.join(sorted(REASONS))}); example: before_dispatch")
     for k in {'operation_id','attempt_id','retry_of_attempt_id','brief_ref','enqueue_event_id'} & r.keys():
         check(isinstance(r[k],str) and 0<len(r[k])<=256,'Invalid identifier')
     if 'operation_id' in r: check(re.fullmatch(r'[A-Za-z0-9_-]{1,128}',r['operation_id']) is not None,'Invalid operation_id')

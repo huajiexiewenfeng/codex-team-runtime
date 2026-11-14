@@ -83,10 +83,25 @@ export async function run(args,output=console.log) {
   }
   case 'supervision-plan': {
    const notifications=a.at(-1)==='--notifications';
-   const inputs=notifications?a.slice(0,-1):a;
-   if(inputs.length<2||inputs.length>3||inputs.some(v=>v.startsWith('--'))) throw new Error('supervision-plan <state.json> <caller.json> [cursors.json] [--notifications]');
+   const args=notifications?a.slice(0,-1):a;
+   const selection=/^--wait-batch=([1-9][0-9]*)$/.exec(args.at(-1)??'');
+   const inputs=selection?args.slice(0,-1):args;
+   if(inputs.length<2||inputs.length>3||inputs.some(v=>v.startsWith('--'))) throw new Error('supervision-plan <state.json> <caller.json> [cursors.json] [--wait-batch=N] [--notifications]');
    const { readSupervisionPlan }=await import('./supervision.mjs');
-   output(JSON.stringify(await readSupervisionPlan(inputs[0],await json(inputs[1]),inputs[2]?await json(inputs[2]):[],{notifications}),null,2)); break;
+   const plan=await readSupervisionPlan(inputs[0],await json(inputs[1]),inputs[2]?await json(inputs[2]):[],{notifications});
+   if(selection){
+    const batch=Number(selection[1]);
+    if(!Number.isSafeInteger(batch))throw new Error('Invalid wait batch number');
+    const request=plan.batches[batch-1];
+    plan.waitSource={batch,source:null,signal:request?'template_unavailable':'batch_unavailable'};
+    if(request) {
+     const template=await readFile(new URL('../skills/manager-session/scripts/functions-exec-wait-template.js',import.meta.url),'utf8').catch(()=>null);
+     const marker='const request = {targets: [], timeoutMs: 0};';
+     // Encode exact plan values as data; never interpolate cursor text as code.
+     if(template?.split(marker).length===2)plan.waitSource={batch,source:template.replace(marker,()=>`const request = JSON.parse(${JSON.stringify(JSON.stringify(request))});`)};
+    }
+   }
+   output(JSON.stringify(plan,null,2)); break;
   }
   case 'submission-notice': {
    if(a.length!==3&&!(a.length===5&&a[3]==='--notice-out'&&a[4])) throw new Error('submission-notice <state.json> <worker-caller.json> <taskId> [--notice-out <new-notice.json>]');
