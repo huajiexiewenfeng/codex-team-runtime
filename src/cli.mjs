@@ -18,6 +18,37 @@ async function exportView(state,directory,asOf,roundId) {
  return view;
 }
 export async function run(args,output=console.log) {
+ if(args[0]?.startsWith('watchdog-')) {
+  const {configureWatchdog,watchdogStatus,checkWatchdog,startWatchdogService}=await import('./watchdog-runtime.mjs');
+  const [command,...values]=args;
+  if(['watchdog-background-start','watchdog-background-status','watchdog-background-stop'].includes(command)){
+   const {startWatchdogBackground,watchdogBackgroundStatus,stopWatchdogBackground}=await import('./watchdog-background.mjs');
+   if(command==='watchdog-background-start'){if(values.length!==2)throw new Error('watchdog-background-start <production-manifest.json> <control-root>');const result=await startWatchdogBackground({manifestPath:resolve(values[0]),controlRoot:resolve(values[1])});output(JSON.stringify(result,null,2));return result;}
+   if(values.length!==1)throw new Error('watchdog-background-status|watchdog-background-stop <control-root>');const result=await (command==='watchdog-background-status'?watchdogBackgroundStatus:stopWatchdogBackground)(resolve(values[0]));output(JSON.stringify(result,null,2));return result;
+  }
+
+  if(command==='watchdog-serve') {
+   if(values.length!==1)throw new Error('watchdog-serve <explicit-paths-or-deployment-manifest.json>');
+   const selected=await json(values[0]);
+   if(Array.isArray(selected))return startWatchdogService(selected);
+   const {loadWatchdogDeployment}=await import('./watchdog-deployment.mjs'),deployment=await loadWatchdogDeployment(resolve(values[0]));
+   return startWatchdogService(deployment.statePaths,{deployment,readOptions:deployment.readOptions??{}});
+  }
+  if(command==='watchdog-check'&&values.length===3&&values[1]==='--deployment'){
+   const {loadWatchdogDeployment}=await import('./watchdog-deployment.mjs'),selected=await loadWatchdogDeployment(resolve(values[2])),statePath=resolve(values[0]);
+   if(!selected.adapterFor(statePath))throw new Error('State is not registered in explicit deployment');
+   const result=await checkWatchdog(statePath,{deployment:selected.adapterFor(statePath)});output(JSON.stringify(await watchdogStatus(statePath),null,2));return result;
+  }
+  const detail=command==='watchdog-status'&&values[1]==='--detail';
+  if(values.length!==(detail?2:1))throw new Error('watchdog-on|watchdog-off|watchdog-status|watchdog-check <state.json> [status only: --detail]');
+  let result;
+  if(command==='watchdog-on'||command==='watchdog-off')result=await configureWatchdog(values[0],command==='watchdog-on');
+  else if(command==='watchdog-status')result=await watchdogStatus(values[0],{detail});
+  else if(command==='watchdog-check')result=await checkWatchdog(values[0]);
+  else throw new Error('Unknown Watchdog command');
+  const view=['watchdog-on','watchdog-off'].includes(command)?{enabled:result.enabled,phase:result.phase,lastFault:result.lastFault}:command==='watchdog-status'?result:await watchdogStatus(values[0]);
+  output(JSON.stringify(view,null,2));return result;
+ }
  if(args[0]==='manager-request') {
   let result;
   try {
@@ -298,9 +329,13 @@ export async function run(args,output=console.log) {
   default: throw new Error('Commands: start, attach, detach, resume, register-worker, queue-task, start-task, cancel-queued, cancel-stopped, dispatch-plan, dispatch-freeze, dispatch-request, dispatch-export, delivery-plan, delivery-check, delivery-claim, supervision-plan, submission-notice, notice-request, receive-submission, pending-submissions, notice-track, notice-plan, notice-claim, notice-result, reporting-init, reporting-plan, reporting-apply, reporting-tick, reporting-progress, metrics-import, metrics, metrics-export, metrics-daily, metrics-daily-export, init, apply, snapshot, render, dashboard, dashboard-serve, demo. See docs/runtime-usage.md');
  }
 }
+export function wireServiceShutdown(service,target=process) {
+ const stop=()=>{void service.close().catch(error=>{console.error(`Error: ${error.message}`);target.exitCode=1;});};
+ target.once('SIGINT',stop);target.once('SIGTERM',stop);
+ return ()=>{target.removeListener('SIGINT',stop);target.removeListener('SIGTERM',stop);};
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) run(process.argv.slice(2)).then(service=>{
  if(service?.phase==='finished'&&service.businessSuccess===false){process.exitCode=1;return;}
  if(!service?.close)return;
- const stop=()=>{void service.close().catch(error=>{console.error(`Error: ${error.message}`);process.exitCode=1;});};
- process.once('SIGINT',stop);process.once('SIGTERM',stop);
+ wireServiceShutdown(service);
 }).catch(error=>{console.error(error.code === 'NOTICE_MISMATCH' ? JSON.stringify({code:error.code,message:error.message}) : `Error: ${error.message}`);process.exitCode=1;});

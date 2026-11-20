@@ -1,0 +1,7 @@
+# Watchdog 独立安装与回退
+
+本地安装使用CODEX_HOME/runtimes/watchdog下的独立版本目录；不覆盖既有codex-team-context companion，不修改全局MCP配置。已安装Skill同目录的runtime-root.json记录确切runtimeRoot、安装manifest和安装回执路径，不能据cwd猜测。
+
+安装回执保存逐文件SHA-256、Skill安装前备份或原先不存在的记录、既有companion/配置未变校验、安装后离线测试结果，以及冲突保护的rollback.mjs入口。回退仅在安装文件hash仍匹配时恢复原Skill或撤销本次新Skill；独立Runtime保留，不恢复或改写业务台账、Registry、通知、receipt或团队开关。
+
+安装和Skill可被发现不代表进程在线、团队已注册或真实收益已验证。服务启动与每个团队显式deployment注册需按已授权范围另行执行。长期日志的session_meta版本可能与当前客户端不同；门槛拒绝时如实报告，不擅自修改allowlist。
