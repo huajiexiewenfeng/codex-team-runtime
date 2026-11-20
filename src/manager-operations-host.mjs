@@ -10,9 +10,7 @@ const requireScope=(ok,field)=>{if(!ok)fail('IDENTITY_CONFLICT',field,'exact fro
 const error=(e,stages)=>({status:'error',reasonCode:e.code??'HOST_FLOW_ERROR',field:e.field??'host',
   message:String(e.message).slice(0,300),stages,sendNow:false,nextAction:'inspect completed stages and exact operation status; never resend automatically'});
 
-export async function prepareManagerDispatch({statePath,enqueueInput,brief,prepareInput,options={}}) {
-  const stages={};
-  try {
+export function validateManagerDispatchInputs({enqueueInput,brief,prepareInput}) {
     if(!enqueueInput||Object.hasOwn(enqueueInput,'briefRef')||!prepareInput||
       Object.keys(prepareInput).some(k=>!['operation_id','reason','admission','baseline','retry_of_attempt_id'].includes(k)))
       fail('INVALID_REQUEST','inputs','enqueueInput omits briefRef; prepareInput contains only operation_id/reason/admission/baseline/retry_of_attempt_id');
@@ -27,6 +25,13 @@ export async function prepareManagerDispatch({statePath,enqueueInput,brief,prepa
     requireScope(brief.teamId===enqueueRequest.teamId&&brief.roundId===enqueueRequest.roundId&&brief.taskId===enqueueRequest.taskId&&
       fingerprint(brief.actor)===fingerprint(enqueueRequest.caller)&&prepareRequest.actor_host_id===enqueueRequest.caller.hostId&&
       prepareRequest.actor_thread_id===enqueueRequest.caller.threadId,'caller');
+    return {enqueueRequest,prepareRequest};
+}
+
+export async function prepareManagerDispatch({statePath,enqueueInput,brief,prepareInput,options={}}) {
+  const stages={};
+  try {
+    let {enqueueRequest,prepareRequest}=validateManagerDispatchInputs({enqueueInput,brief,prepareInput});
     stages.frozen=await freezeDispatchBrief(statePath,brief,options);
     enqueueRequest={...enqueueRequest,briefRef:stages.frozen.briefRef};
     prepareRequest={...prepareRequest,brief_ref:stages.frozen.briefRef};

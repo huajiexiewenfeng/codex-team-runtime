@@ -28,6 +28,19 @@ Read evidence first; search/tail long logs. Read the smallest turn slice only fo
 
 ## Manager-only named operations (local trial)
 
+For an independently authorized **new task**, an installation verified to include
+the fixed dispatch candidate may use `runManagerDispatch` from that same template;
+read `docs/manager-dispatch-entry.md` in the verified Runtime. Supply one task
+decision and existing authorization/native identity/admission facts; the program
+saves material, derives stable task/operation IDs, enqueues, prepares, consumes
+one attempt grant, calls native send at most once and records the actual result.
+Do not hand-build events/times/results or reuse this path for clarification/rework.
+Repeated calls reconcile only. Prepared-but-unclaimed has no resumed send grant
+under current E04; claimed/unknown never resends. Missing capability does not
+authorize bare-send fallback. This adds no Worker startup/recovery/submission
+step, approval, model round or Watchdog behavior.
+
+
 At existing authorized checkpoints use verified installed `docs/manager-operations.md` and `scripts/manager-operations-functions-exec.js` (see [capability checks](manager-supervision-reference.md#manager-only-named-operations-local-trial) if needed), keeping mode and admission unchanged. Receive starts review only; approve/rework follows independent acceptance and an explicit Manager decision.
 
 For formal submissions on this verified installation, this is the normal Manager entry: use `runManagerReviewStage` with `phase: 'receive'` for the existing `receive` request. After independent review, use a separate invocation with `phase: 'decision'` and `managerDecisionConfirmed: true` for `record_decision`, tied to the exact submission and review event returned by receipt (or recovered from the existing review). Give the program the verified request inputs; it handles UTC, event IDs and references, CAS and idempotency. Do not hand-build business events or use manual event + apply for normal receipt or decision.

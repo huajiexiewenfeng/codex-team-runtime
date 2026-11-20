@@ -9,20 +9,20 @@ import {prepareSubmissionNotice} from '../src/submission-notice.mjs';
 import {operationEventId} from '../src/manager-operations-contract.mjs';
 
 export const at='2026-10-28T00:00:00.000Z',caller={hostId:'fake-host',threadId:'fake-m'};
-export async function fixture(t,mode='legacy') {
+export async function fixture(t,mode='legacy',{teamId='team'}={}) {
   const root=await realpath(await mkdtemp(join(tmpdir(),'manager-operations-'))),statePath=join(root,'state.json'),registryPath=join(root,'registry.json');
   t.after(async()=>{if(!root.startsWith(await realpath(tmpdir())+sep))throw Error('unsafe fixture cleanup');await rm(root,{recursive:true,force:true,maxRetries:3});});
   const source={kind:'manual',ref:'synthetic offline fixture, no native host or real team'};
   const member=(id,role)=>({id,role,name:id,lifecycle:'active',binding:{status:'bound',hostId:'fake-host',threadId:'fake-'+id}});
-  let s=createState({teamId:'team',name:'Offline',source,members:[member('m','Manager'),member('l','Liaison'),member('w','Worker'),member('w2','Worker')]},at);
+  let s=createState({teamId:teamId,name:'Offline',source,members:[member('m','Manager'),member('l','Liaison'),member('w','Worker'),member('w2','Worker')]},at);
   s=evolve(s,{id:'open',type:'openRound',actor:'m',at,source,roundId:'r',title:'Offline'},s.version);
-  s={...s,schemaVersion:2,registry:{registryId:'registry',registryPath,teamId:'team',migrationId:'migration',sourceSha256:'a'.repeat(64),sourceVersion:s.version,phase:'active',teamRevision:1,readyMemberIds:['m','l','w','w2']}};
+  s={...s,schemaVersion:2,registry:{registryId:'registry',registryPath,teamId:teamId,migrationId:'migration',sourceSha256:'a'.repeat(64),sourceVersion:s.version,phase:'active',teamRevision:1,readyMemberIds:['m','l','w','w2']}};
   await writeFile(statePath,JSON.stringify(s));
-  await writeFile(registryPath,JSON.stringify({registryId:'registry',teams:[{id:'team',revision:1,leaderMemberId:'m',runtime:{statePath},members:s.members.map(m=>({...m,binding:{...m.binding,revision:1}}))}]}));
-  const options={at,exporter:async s=>({registryId:'registry',teamId:'team',teamRevision:1,migrationId:'migration',statePath,members:s.members,readyMemberIds:s.registry.readyMemberIds})};
+  await writeFile(registryPath,JSON.stringify({registryId:'registry',teams:[{id:teamId,revision:1,leaderMemberId:'m',runtime:{statePath},members:s.members.map(m=>({...m,binding:{...m.binding,revision:1}}))}]}));
+  const options={at,exporter:async s=>({registryId:'registry',teamId:teamId,teamRevision:1,migrationId:'migration',statePath,members:s.members,readyMemberIds:s.registry.readyMemberIds})};
   const raw=()=>readFile(statePath,'utf8').then(JSON.parse),ledger=()=>readFile(statePath+'.manager-inbox.json','utf8').then(JSON.parse);
   let seq=0;
-  const inbox=(action,extra={},opts={})=>inboxRuntime({statePath,registryPath,options:{...options,...opts},request:{action,actor_host_id:caller.hostId,actor_thread_id:caller.threadId,team_id:'team',reason:'manual',...(action==='status'?{}:{operation_id:'fixture-'+(++seq)}),...extra}});
+  const inbox=(action,extra={},opts={})=>inboxRuntime({statePath,registryPath,options:{...options,...opts},request:{action,actor_host_id:caller.hostId,actor_thread_id:caller.threadId,team_id:teamId,reason:'manual',...(action==='status'?{}:{operation_id:'fixture-'+(++seq)}),...extra}});
   if(mode!=='legacy') {
     const init=await inbox('control',{command:'init',authorization_ref:'fixture setup only',expected_absent:true,expected_state_version:s.version,team_revision:1});
     if(init.status==='error')throw Error(JSON.stringify(init));
@@ -31,14 +31,14 @@ export async function fixture(t,mode='legacy') {
       await inbox('control',{command:'resume_claims',authorization_ref:'fixture',expected_control_revision:(await ledger()).controlRevision});
     }
   }
-  const base=async(action,extra={})=>({schemaVersion:1,action,operationId:'op-'+(++seq),caller,teamId:'team',roundId:'r',taskId:'t',workerId:'w',expectedVersion:(await raw()).version,mode,reason:'manual',...extra});
+  const base=async(action,extra={})=>({schemaVersion:1,action,operationId:'op-'+(++seq),caller,teamId:teamId,roundId:'r',taskId:'t',workerId:'w',expectedVersion:(await raw()).version,mode,reason:'manual',...extra});
   const call=(request,opts={})=>managerRequest({statePath,request,options:{...options,...opts}});
   const event=async(type,extra={},actor='m')=>{
     const s=await raw(),next=evolve(s,{id:'old-'+(++seq),type,actor,at,source,roundId:'r',taskId:'t',...extra},s.version);
     await writeFile(statePath,JSON.stringify(next));return next.events.at(-1);
   };
   const enqueue=async(extra={},text='原文 中文\r\nbrief; cross-project D:/project-a; PDC optional')=>{
-    const taskId=extra.taskId??'t',brief={schemaVersion:1,teamId:'team',roundId:'r',taskId,actor:caller,text,
+    const taskId=extra.taskId??'t',brief={schemaVersion:1,teamId:teamId,roundId:'r',taskId,actor:caller,text,
       scope:'fixture only',materialRefs:['fixture'],authorizationRef:'fixture:authorization',dependencyRef:'fixture:dependency'};
     const frozen=await freezeDispatchBrief(statePath,brief,options);
     const request=await base('enqueue',{title:'Generic task',required:true,briefRef:frozen.briefRef,...extra});
@@ -46,7 +46,7 @@ export async function fixture(t,mode='legacy') {
   };
   const dispatch=async q=>{
     const r={action:'prepare',operation_id:'fake-prepare-'+(++seq),actor_host_id:caller.hostId,actor_thread_id:caller.threadId,
-      team_id:'team',round_id:'r',task_id:q.request.taskId,worker_id:q.request.workerId,reason:'before_dispatch',
+      team_id:teamId,round_id:'r',task_id:q.request.taskId,worker_id:q.request.workerId,reason:'before_dispatch',
       enqueue_event_id:q.result.eventId,brief_ref:q.frozen.briefRef,admission:{native:{host_id:'fake-host',thread_id:'fake-'+q.request.workerId,status:'idle',evidence_ref:'fixture idle'}},baseline:{outcome:'not-attempted',evidence_ref:'fixture never sent'}};
     return {request:r,result:await dispatchRuntime({statePath,registryPath,request:r,options})};
   };

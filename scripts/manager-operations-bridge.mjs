@@ -10,6 +10,7 @@ import {parseInboxJson} from '../src/manager-inbox-contract.mjs';
 
 export async function managerOperationsBridge(action,requestFile,payload={},options={}) {
   try {
+    if(['save','entry_prepare','entry_result','recover','entry_status'].includes(action)){const {dispatchEntryStage}=await import('../src/manager-dispatch-entry.mjs');return await dispatchEntryStage(action,requestFile,payload,options);}
     const input=parseInboxJson(await readFile(requestFile,'utf8'),1024*1024);
     if(['receive','decision'].includes(action)) {
       const allowed=['statePath','request',...(action==='decision'?['resolveRequest']:[])];

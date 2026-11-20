@@ -100,12 +100,26 @@ mean inbox resolve, native receipt, deployment, or business verification succeed
 
 ## Fixed functions.exec host path
 
+For the candidate single-decision entry for independent new tasks, see
+[fixed dispatch entry](manager-dispatch-entry.md). It adds automatic material
+saving and attempt-scoped transport evidence while reusing the flow below.
+It is not installed by the existence of this source file. Existing review
+receive/decision calls and Worker protocols are unchanged.
+
+
 The directly pasteable template is
 [`manager-operations-functions-exec.js`](../scripts/manager-operations-functions-exec.js).
 It uses only `tools.exec_command`, `tools.write_stdin` and the actual native send
 tool. It requires no Node import/fs in `functions.exec`. A trusted Node bridge
 runs the original Runtime code through the existing shell tool. No new global
 tool is registered. The environment must already expose those host capabilities.
+All three fixed host entry functions accept closed hostExecutionOptions
+(sandbox_permissions plus justification only). Use original tools directly;
+select require_escalated explicitly when authorized and needed by the host.
+No automatic escalation, startup probe or shell/prepare/send retry is added.
+See docs/manager-dispatch-entry.md for exact options and bounded diagnostics.
+A terminal exit_code is required for success; exit1 structured errors retain
+the Runtime reason/field, while nonzero or unknown completion never grants send.
 Supply the **verified absolute installed Python exporter executable** separately
 as `pythonExecutable`. An ordinary shell does not inherit the MCP launcher's
 exporter configuration. The template passes this path as an argument to the

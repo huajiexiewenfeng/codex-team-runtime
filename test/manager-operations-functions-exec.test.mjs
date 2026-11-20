@@ -52,11 +52,11 @@ test('Manager review regression: huge native failure + result output loss stay b
     let sends=0,calls=0;
     const giant='原始错误正文\n'.repeat(25000),tools={exec_command:async()=>{
       calls++;
-      if(loss==='prepare-malformed')return {output:giant};
-      if(calls===1)return {output:JSON.stringify({status:'prepared',sendNow:true,inputFingerprint:'a'.repeat(64),stages:{prepare:{status:'prepared',message:giant,unrecognizedBody:giant}},
+      if(loss==='prepare-malformed')return {exit_code:0,output:giant};
+      if(calls===1)return {exit_code:0,output:JSON.stringify({status:'prepared',sendNow:true,inputFingerprint:'a'.repeat(64),stages:{prepare:{status:'prepared',message:giant,unrecognizedBody:giant}},
         hostRequest:{tool:'mcp__codex_app__send_message_to_thread',arguments:{hostId:'h',threadId:'w',prompt:'original'}},resultRequestBase:{attempt_id:'real-attempt'}})};
       if(loss==='result-throws')throw Error(giant);
-      return {output:giant};
+      return {exit_code:0,output:giant};
     },mcp__codex_app__send_message_to_thread:async()=>{sends++;return {isError:true,content:[{type:'text',text:giant}]};}};
     const result=await run({tools,nodeExecutable:'node',pythonExecutable:'C:/verified python/python.exe',runtimeRoot:'r',requestFile:'input',hostSendAuthorized:true,authorizationRef:'actual reference'});
     assert.ok(Buffer.byteLength(JSON.stringify(result))<8192);assert.equal(sends,loss==='prepare-malformed'?0:1);
@@ -72,7 +72,7 @@ for(const mode of ['legacy','queue_first'])test(`P0-2 ${mode} functions.exec rec
   const recv=await f.receive(),source=await readFile(new URL('../scripts/manager-operations-functions-exec.js',import.meta.url),'utf8');
   const run=runInNewContext(source+'\nrunManagerReviewStage;',{},{timeout:1000}),path=f.root+'/review-stage.json';
   let calls=0;const tools={exec_command:async({cmd})=>{calls++;const argv=[...cmd.matchAll(/'((?:[^']|'')*)'/g)].map(m=>m[1].replace(/''/g,"'"));
-    return {output:JSON.stringify(await managerOperationsBridge(argv[2],argv[3],{},f.options))};}};
+    return {exit_code:0,output:JSON.stringify(await managerOperationsBridge(argv[2],argv[3],{},f.options))};}};
   const args={tools,nodeExecutable:'node',pythonExecutable:'C:/verified python/python.exe',runtimeRoot:'runtime',requestFile:path};
   await writeFile(path,JSON.stringify({statePath:f.statePath,request:recv.request}));
   const received=await run({...args,phase:'receive'});assert.equal(received.status,'recorded');assert.equal((await f.raw()).tasks[0].status,'reviewing');
