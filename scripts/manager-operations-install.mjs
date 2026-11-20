@@ -7,7 +7,9 @@ import {promisify} from 'node:util';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
 const execute=promisify(execFile),sha=b=>createHash('sha256').update(b).digest('hex');
-export const ALLOWED=Object.freeze({companion:['src/manager-inbox-contract.mjs','src/manager-inbox.mjs','src/manager-operations-contract.mjs','src/manager-operations.mjs','src/manager-operations-host.mjs','scripts/manager-operations-bridge.mjs','scripts/manager-operations-functions-exec.js','docs/manager-operations.md','src/cli.mjs'],skill:['references/manager-supervision.md']});
+// v1 remains exact for old package verification and rollback.
+export const LEGACY_ALLOWED=Object.freeze({companion:['src/manager-inbox-contract.mjs','src/manager-inbox.mjs','src/manager-operations-contract.mjs','src/manager-operations.mjs','src/manager-operations-host.mjs','scripts/manager-operations-bridge.mjs','scripts/manager-operations-functions-exec.js','docs/manager-operations.md','src/cli.mjs'],skill:['references/manager-supervision.md']});
+export const ALLOWED=Object.freeze({companion:[...LEGACY_ALLOWED.companion.slice(0,-1),'src/manager-dispatch-entry.mjs','docs/manager-dispatch-entry.md','src/cli.mjs'],skill:LEGACY_ALLOWED.skill});
 const demand=(ok,code)=>{if(!ok)throw Error(code);};
 const key=p=>resolve(p).toLowerCase();
 const inside=(root,path)=>{const r=relative(resolve(root),resolve(path));return !!r&&!r.startsWith('..'+sep)&&r!=='..'&&!isAbsolute(r);};
@@ -34,9 +36,10 @@ async function context(args){
   demand(isAbsolute(args.packageRoot??'')&&/^[a-f0-9]{64}$/.test(args.manifestSha256??''),'PACKAGE_HASH pinned manifest required');
   await noLinks(args.packageRoot);const bytes=await readFile(join(args.packageRoot,'manifest.json'));
   demand(sha(bytes)===args.manifestSha256,'PACKAGE_HASH manifest mismatch');const m=JSON.parse(bytes);
-  demand(m.schemaVersion==='manager-operations-code-package/v1'&&Array.isArray(m.files)&&Array.isArray(m.baseline),'MANIFEST_SCHEMA');
-  demand(m.files.length===Object.values(ALLOWED).flat().length,'MANIFEST_PATH incomplete payload');
-  const seen=new Set();for(const f of m.files){demand(safe(f.path)&&ALLOWED[f.scope]?.includes(f.path)&&!seen.has(f.scope+'/'+f.path),'MANIFEST_PATH');seen.add(f.scope+'/'+f.path);demand(/^[a-f0-9]{64}$/.test(f.sha256)&&(f.beforeSha256===null||/^[a-f0-9]{64}$/.test(f.beforeSha256)),'MANIFEST_HASH');}
+  demand(['manager-operations-code-package/v1','manager-operations-code-package/v2'].includes(m.schemaVersion)&&Array.isArray(m.files)&&Array.isArray(m.baseline),'MANIFEST_SCHEMA');
+  const allowed=m.schemaVersion==='manager-operations-code-package/v1'?LEGACY_ALLOWED:ALLOWED;
+  demand(m.files.length===Object.values(allowed).flat().length,'MANIFEST_PATH incomplete payload');
+  const seen=new Set();for(const f of m.files){demand(safe(f.path)&&allowed[f.scope]?.includes(f.path)&&!seen.has(f.scope+'/'+f.path),'MANIFEST_PATH');seen.add(f.scope+'/'+f.path);demand(/^[a-f0-9]{64}$/.test(f.sha256)&&(f.beforeSha256===null||/^[a-f0-9]{64}$/.test(f.beforeSha256)),'MANIFEST_HASH');}
   demand(m.files.at(-2).scope==='companion'&&m.files.at(-2).path==='src/cli.mjs'&&m.files.at(-1).scope==='skill','MANIFEST_ACTIVATION_ORDER');
   for(const f of m.baseline)demand(safe(f.path)&&['companion','skill'].includes(f.scope)&&/^[a-f0-9]{64}$/.test(f.sha256),'MANIFEST_PATH baseline');
   demand(isAbsolute(m.evidenceRoot)&&isAbsolute(m.targets.companion)&&isAbsolute(m.targets.skill),'TARGET_PATH');

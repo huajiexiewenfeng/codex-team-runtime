@@ -7,8 +7,8 @@ import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {fileURLToPath} from 'node:url';
-import {buildPackage} from '../scripts/manager-operations-package.mjs';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {buildPackage,patchManagerCli} from '../scripts/manager-operations-package.mjs';
 import {preflight,install,rollback,verifyInstalled} from '../scripts/manager-operations-install.mjs';
 
 const source=fileURLToPath(new URL('..',import.meta.url));
@@ -41,14 +41,14 @@ after(async()=>{
   assert.match(basename(target),/^manager-operations-install-/);
   await rm(target,{recursive:true,force:true,maxRetries:3});
 });
-async function fixture(){
+async function fixture({cliText}={}){
   const evidenceRoot=await mkdtemp(join(suiteRoot,'case-'));
   const companion=join(evidenceRoot,'legacy-companion'),skill=join(evidenceRoot,'legacy-skill');
   await mkdir(join(companion,'src'),{recursive:true});
   await mkdir(join(skill,'references'),{recursive:true});
   await Promise.all(sharedCore.map(name=>copyFile(join(source,'src',name+'.mjs'),join(companion,'src',name+'.mjs'))));
   await writeFile(join(companion,'src','cli.mjs'),
-    "export async function run(args,output=console.log) {\n  output(args.join(' '));\n}\n");
+    cliText??"export async function run(args,output=console.log) {\n  output(args.join(' '));\n}\n");
   await writeFile(join(skill,'references','manager-supervision.md'),'# Manager supervision\n\nUse the legacy review route.\n');
   const pkg=await buildPackage({output:join(evidenceRoot,'package'),evidenceRoot,companion,skill,
     nodeExecutable:process.execPath,pythonExecutable});
@@ -139,4 +139,62 @@ test('abrupt real child exit after code write leaves explicit pending lock; reco
   assert.deepEqual(await readFile(target(f,'companion','src/cli.mjs')),before);
   assert.equal(await readFile(facts,'utf8'),'in-flight facts survive interrupted install');
   assert.equal((await preflight(f)).status,'ready');
+});
+
+const dispatchPayload=['src/manager-dispatch-entry.mjs','docs/manager-dispatch-entry.md'];
+async function asLegacyPackage(f){
+  const path=join(f.packageRoot,'manifest.json'),m=JSON.parse(await readFile(path));
+  m.schemaVersion='manager-operations-code-package/v1';
+  m.files=m.files.filter(row=>!dispatchPayload.includes(row.path));
+  const bytes=Buffer.from(JSON.stringify(m));await writeFile(path,bytes);
+  return {...f,manifestSha256:hash(bytes)};
+}
+
+test('v2 package contains the fixed dispatch module/docs and no Watchdog CLI imports',async()=>{
+  const f=await fixture(),m=JSON.parse(await readFile(join(f.packageRoot,'manifest.json')));
+  assert.equal(m.schemaVersion,'manager-operations-code-package/v2');
+  for(const path of dispatchPayload)assert.ok(m.files.some(row=>row.scope==='companion'&&row.path===path));
+  assert.ok(m.dependencies.some(row=>row.path==='src/manager-dispatch-entry.mjs'));
+  assert.equal(m.files.some(row=>row.path.includes('watchdog')),false);
+  const cli=await readFile(join(f.packageRoot,'payload/companion/src/cli.mjs'),'utf8');
+  assert.match(cli,/manager-request/);assert.doesNotMatch(cli,/watchdog|inbox-/);
+  await install(f);
+  const url=pathToFileURL(target(f,'companion','src/cli.mjs')).href;
+  const {stdout}=await execute(process.execPath,['--input-type=module','-e',
+    'const {run}=await import('+JSON.stringify(url)+');await run(["manager-request"]);'],{windowsHide:true,encoding:'utf8'});
+  assert.equal(JSON.parse(stdout).reasonCode,'INVALID_REQUEST');
+  await rollback(f);
+  for(const path of dispatchPayload)await assert.rejects(readFile(target(f,'companion',path)),{code:'ENOENT'});
+});
+
+test('Manager CLI extraction excludes a Watchdog block even when it is adjacent before inbox',()=>{
+  const baseline="export async function run(args,output=console.log) {\n output('baseline');\n}\n";
+  const integrated="export async function run(args,output=console.log) {\n if(args[0]==='manager-request') {\n  const {managerRequest}=await import('./manager-operations.mjs');\n  return managerRequest(args);\n }\n if(args[0]?.startsWith('watchdog-')) {\n  return import('./watchdog-uninstalled.mjs');\n }\n if(/^inbox-/.test(args[0])) {\n  return import('./manager-inbox.mjs');\n }\n}\n";
+  const patched=patchManagerCli(baseline,integrated).toString();
+  assert.match(patched,/manager-request/);assert.doesNotMatch(patched,/watchdog|inbox-/);
+});
+
+test('emitted CLI dependency validation refuses an uninstalled local import',async()=>{
+  await assert.rejects(fixture({cliText:"import './watchdog-uninstalled.mjs';\nexport async function run(args,output=console.log) {\n output(args);\n}\n"}),
+    /UNLISTED_DEPENDENCY src\/watchdog-uninstalled.mjs/);
+});
+
+test('frozen v1 manifest contract still preflights, applies, verifies and rolls back',async()=>{
+  const f=await asLegacyPackage(await fixture());
+  assert.equal((await preflight(f)).status,'ready');await install(f);
+  assert.equal((await verifyInstalled(f)).status,'installed');
+  const facts=target(f,'companion','legacy-inflight-facts.json');await writeFile(facts,'existing business fact');
+  assert.equal((await rollback(f)).status,'rolled-back');
+  assert.equal(await readFile(facts,'utf8'),'existing business fact');
+});
+
+test('v1 cannot acquire new dispatch paths and v2 cannot omit them',async()=>{
+  const old=await asLegacyPackage(await fixture()),oldPath=join(old.packageRoot,'manifest.json');
+  const legacy=JSON.parse(await readFile(oldPath));legacy.files[0].path='src/manager-dispatch-entry.mjs';
+  let bytes=Buffer.from(JSON.stringify(legacy));await writeFile(oldPath,bytes);
+  await assert.rejects(preflight({...old,manifestSha256:hash(bytes)}),/MANIFEST_PATH/);
+  const f=await fixture(),path=join(f.packageRoot,'manifest.json'),current=JSON.parse(await readFile(path));
+  current.files=current.files.filter(row=>row.path!=='src/manager-dispatch-entry.mjs');
+  bytes=Buffer.from(JSON.stringify(current));await writeFile(path,bytes);
+  await assert.rejects(preflight({...f,manifestSha256:hash(bytes)}),/MANIFEST_PATH/);
 });

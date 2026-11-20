@@ -23,6 +23,32 @@ async function inventory(root,scope,path=''){
     else{need(entry.isFile(),'baseline special file');const b=await readFile(join(root,rel));rows.push({scope,path:rel.replaceAll('\\','/'),sha256:hash(b),size:b.length});}
   }return rows.sort((a,b)=>a.path.localeCompare(b.path));
 }
+
+const localImports=(bytes,path)=>[...bytes.toString().matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"](\.[^'"]+)['"]/g)].map(match=>{
+  const dependency=relative(sourceRoot,resolve(sourceRoot,dirname(path),match[1])).replaceAll('\\','/');
+  need(dependency!=='..'&&!dependency.startsWith('../'),'UNLISTED_DEPENDENCY '+dependency);return dependency;
+});
+// Preserve the installed CLI and splice only the same-indent Manager block,
+// never all code up to another route (which may include uninstalled features).
+export function patchManagerCli(installed,candidate){
+  const marker=" if(args[0]==='manager-request') {",old=installed.toString(),text=candidate.toString(),start=text.indexOf(marker);
+  need(start>=0&&text.split(marker).length===2&&!old.includes('manager-request'),'CLI_ROUTE_BASELINE');
+  const tail=text.slice(start),end=/^ }\r?$/m.exec(tail);
+  need(end&&end.index>marker.length,'CLI_ROUTE_BASELINE');
+  const anchor='export async function run(args,output=console.log) {';
+  need(old.split(anchor).length===2,'CLI_ROUTE_ANCHOR');
+  return Buffer.from(old.replace(anchor,anchor+'\n'+tail.slice(0,end.index+end[0].length)+'\n'));
+}
+async function payloadClosure(roots,files,output){
+  const payload=new Map(files.filter(f=>f.scope==='companion').map(f=>[f.path,join(output,'payload',f.scope,f.path)])),seen=new Set();
+  async function visit(path){
+    if(seen.has(path))return;seen.add(path);
+    const bytes=payload.has(path)?await readFile(payload.get(path)):await absentRead(join(roots.companion,path));
+    need(bytes,'UNLISTED_DEPENDENCY '+path);
+    for(const dependency of localImports(bytes,path))await visit(dependency);
+  }
+  for(const path of payload.keys())if(/\.(?:mjs|js)$/.test(path))await visit(path);
+}
 async function closure(roots){
   const seen=new Set(),rows=[];
   async function visit(path){if(seen.has(path))return;seen.add(path);const bytes=await readFile(join(sourceRoot,path));
@@ -30,7 +56,7 @@ async function closure(roots){
     need(!old||bytes.toString().replaceAll('\r\n','\n')===old.toString().replaceAll('\r\n','\n'),'SHARED_CORE_UPGRADE_REQUIRES_REVIEW '+path);
     need(old||ALLOWED.companion.includes(path),'UNLISTED_DEPENDENCY '+path);
     rows.push({path,candidateSha256:hash(bytes),installedSha256:old&&hash(old),action:old?'retain installed bytes':'add exact candidate bytes',normalizedEqual:old?true:null});
-    for(const match of bytes.toString().matchAll(/(?:from\s*|import\s*\()\s*['"](\.[^'"]+)['"]/g))await visit(relative(sourceRoot,resolve(sourceRoot,dirname(path),match[1])).replaceAll('\\','/'));
+    for(const dependency of localImports(bytes,path))await visit(dependency);
   }
   for(const path of ['src/manager-operations.mjs','src/manager-operations-host.mjs','scripts/manager-operations-bridge.mjs'])await visit(path);
   return rows;
@@ -41,11 +67,7 @@ export async function buildPackage({output=join(DEFAULTS.evidenceRoot,'package')
   await mkdir(output,{recursive:false});
   const baseline=[...await inventory(targets.companion,'companion'),...await inventory(targets.skill,'skill')],dependencies=await closure(targets),files=[];
   const cli=await readFile(join(targets.companion,'src/cli.mjs')),candidate=await readFile(join(sourceRoot,'src/cli.mjs'),'utf8');
-  const start=candidate.indexOf(" if(args[0]==='manager-request') {"),end=candidate.indexOf(' if(/^inbox-',start);
-  need(start>0&&end>start&&!cli.includes(Buffer.from('manager-request')),'CLI_ROUTE_BASELINE');
-  const anchor='export async function run(args,output=console.log) {',old=cli.toString();
-  need(old.split(anchor).length===2,'CLI_ROUTE_ANCHOR');
-  const patchedCli=Buffer.from(old.replace(anchor,anchor+'\n'+candidate.slice(start,end)));
+  const patchedCli=patchManagerCli(cli,candidate);
   const originalSkill=await readFile(join(targets.skill,'references/manager-supervision.md'));
   need(!originalSkill.includes(Buffer.from('## Manager-only named operations')),'SKILL_ROUTE_ALREADY_EXISTS');
   for(const [scope,paths] of Object.entries(ALLOWED))for(const path of paths){
@@ -55,8 +77,9 @@ export async function buildPackage({output=join(DEFAULTS.evidenceRoot,'package')
     const dest=join(output,'payload',scope,path);await mkdir(dirname(dest),{recursive:true});await writeFile(dest,bytes,{flag:'wx'});
     files.push({scope,path,kind:before?'modify':'add',beforeSha256:before&&hash(before),sha256:hash(bytes),size:bytes.length});
   }
+  await payloadClosure(targets,files,output);
   const installer=await readFile(new URL('./manager-operations-install.mjs',import.meta.url));await writeFile(join(output,'install.mjs'),installer,{flag:'wx'});
-  const manifest={schemaVersion:'manager-operations-code-package/v1',createdAt:new Date().toISOString(),sourceHead:'f673659cb9eb996ccfd5876b4466de4ca42ec420',evidenceRoot:settings.evidenceRoot,targets,capabilities:await capabilities(settings.nodeExecutable,settings.pythonExecutable),installerSha256:hash(installer),baseline,dependencies,files,
+  const manifest={schemaVersion:'manager-operations-code-package/v2',createdAt:new Date().toISOString(),sourceHead:'f673659cb9eb996ccfd5876b4466de4ca42ec420',evidenceRoot:settings.evidenceRoot,targets,capabilities:await capabilities(settings.nodeExecutable,settings.pythonExecutable),installerSha256:hash(installer),baseline,dependencies,files,
     excluded:['all state/Registry/notification/task data','Python/MCP/config/model settings','shared SKILL.md/structured-submission.md','Worker/Liaison rules and prompts','all existing shared core files including worker-runtime.mjs','source E05 CLI routes','test/benchmark/compatibility/fixture tooling']};
   const bytes=Buffer.from(JSON.stringify(manifest,null,2)+'\n');await writeFile(join(output,'manifest.json'),bytes,{flag:'wx'});
   const manifestSha256=hash(bytes);await writeFile(join(output,'SHA256SUMS'),[`${manifestSha256}  manifest.json`,`${hash(installer)}  install.mjs`,...files.map(f=>`${f.sha256}  payload/${f.scope}/${f.path}`)].join('\n')+'\n',{flag:'wx'});
