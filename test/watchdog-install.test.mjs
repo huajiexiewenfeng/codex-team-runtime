@@ -11,3 +11,17 @@ test('parallel Skill drift stops before installing a bundle; pinned manifest is 
 test('code rollback refuses an owned service lease and never deletes it or kills Node',async t=>{
  const f=await fixture(t),p=await prepareWatchdogPackage(f);await installWatchdogPackage(p.packageRoot,p.manifestSha256);await mkdir(p.controlRoot,{recursive:true});await writeFile(join(p.controlRoot,'service.lock'),'owned-or-unknown service');await assert.rejects(rollbackWatchdogPackage(p.packageRoot,p.manifestSha256),/Stop this background/);assert.equal(await readFile(join(p.controlRoot,'service.lock'),'utf8'),'owned-or-unknown service');
 });
+
+test('package includes transitive test helpers but never recursively runs installer tests',async t=>{
+ const f=await fixture(t);
+ await mkdir(join(f.sourceRoot,'test/helpers'),{recursive:true});
+ await writeFile(join(f.sourceRoot,'test/helpers/nested.mjs'),'export const value=42;\n');
+ await writeFile(join(f.sourceRoot,'test/manager-operations-helper.mjs'),"export {value} from './helpers/nested.mjs';\n");
+ await writeFile(join(f.sourceRoot,'test/watchdog-desktop-execution.test.mjs'),"import test from 'node:test';import assert from 'node:assert/strict';import {value} from './manager-operations-helper.mjs';test('helper available',()=>assert.equal(value,42));\n");
+ await writeFile(join(f.sourceRoot,'test/watchdog-install.test.mjs'),"throw Error('installer suite must not recurse');\n");
+ const p=await prepareWatchdogPackage(f),manifest=JSON.parse(await readFile(join(p.packageRoot,'manifest.json'),'utf8'));
+ for(const path of ['test/manager-operations-helper.mjs','test/helpers/nested.mjs','test/watchdog-install.test.mjs'])assert.ok(manifest.runtimeFiles.some(f=>f.path===path),path);
+ assert.deepEqual(manifest.tests,['test/watchdog-desktop-execution.test.mjs','test/watchdog-fixture.test.mjs']);
+ const receipt=await installWatchdogPackage(p.packageRoot,p.manifestSha256);
+ assert.equal(receipt.status,'installed-offline-verified');assert.equal(receipt.tests.passed,2);
+});

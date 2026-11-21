@@ -7,9 +7,22 @@ async function list(root,sub=''){const out=[];for(const e of await readdir(join(
 async function rows(root,files){return Promise.all(files.map(async path=>{const b=await readFile(join(root,path));return {path,sha256:sha(b),bytes:b.length};}));}
 async function newFile(p,bytes){await mkdir(dirname(p),{recursive:true});await writeFile(p,bytes,{flag:'wx'});}
 async function checkRows(root,files,exact=false){for(const f of files){need(safe(f.path),'Unsafe package path');need(sha(await readFile(join(root,f.path)))===f.sha256,'File drift '+f.path);}if(exact)need(JSON.stringify(await list(root))===JSON.stringify(files.map(f=>f.path).sort()),'Unexpected extra files');}
+// Include local module dependencies without treating helper modules as test entry points.
+async function testDependencies(root,entries){
+ const found=new Set(entries),pending=[...entries];
+ while(pending.length){const path=pending.pop(),text=await readFile(join(root,path),'utf8');
+  for(const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)(['"])(\.{1,2}\/[^'"]+)\1/g)){
+   const dependency=relative(root,resolve(dirname(join(root,path)),match[2])).replaceAll('\\','/');
+   need(safe(dependency),'Unsafe test dependency '+match[2]);
+   if(!found.has(dependency)){found.add(dependency);pending.push(dependency);}
+  }
+ }
+ return [...found];
+}
 export async function prepareWatchdogPackage({sourceRoot,packageRoot,homeRoot,agentSkillRoot}){
  sourceRoot=resolve(sourceRoot);packageRoot=resolve(packageRoot);homeRoot=resolve(homeRoot);agentSkillRoot=resolve(agentSkillRoot);await mkdir(packageRoot);
- const files=[...(await list(join(sourceRoot,'src'))).map(p=>'src/'+p),'package.json','scripts/watchdog-package-install.mjs',...(await list(join(sourceRoot,'test'))).filter(p=>/^watchdog.*\.test\.mjs$/.test(p)).map(p=>'test/'+p),...(await list(join(sourceRoot,'docs'))).filter(p=>/^watchdog.*\.md$/.test(p)&&!p.includes('host-validation')).map(p=>'docs/'+p)].sort();
+ const testFiles=(await list(join(sourceRoot,'test'))).filter(p=>/^watchdog.*\.test\.mjs$/.test(p)).map(p=>'test/'+p);
+ const files=[...new Set([...(await list(join(sourceRoot,'src'))).map(p=>'src/'+p),'package.json','scripts/watchdog-package-install.mjs',...testFiles,...await testDependencies(sourceRoot,testFiles.filter(p=>p!=='test/watchdog-install.test.mjs')),...(await list(join(sourceRoot,'docs'))).filter(p=>/^watchdog.*\.md$/.test(p)&&!p.includes('host-validation')).map(p=>'docs/'+p)])].sort();
  const runtimeFiles=await rows(sourceRoot,files),contentSha256=sha(JSON.stringify(runtimeFiles)),runtimeRoot=join(homeRoot,'runtimes/watchdog','watchdog-prod-20261116-'+contentSha256.slice(0,12)),controlRoot=join(homeRoot,'runtimes/watchdog/control-production');
  need(!await exists(runtimeRoot),'Version already exists; do not overwrite');const receiptPath=join(packageRoot,'install-receipt.json'),targets=[join(homeRoot,'skills/watchdog'),join(agentSkillRoot,'watchdog')],before=[];
  for(const target of targets){const s=await exists(target);need(!s||s.isDirectory()&&!s.isSymbolicLink(),'Unsafe prior Skill root');before.push({target,exists:!!s,files:s?await rows(target,await list(target)):[],backupPath:join(packageRoot,'before',String(before.length))});}
@@ -17,7 +30,7 @@ export async function prepareWatchdogPackage({sourceRoot,packageRoot,homeRoot,ag
  const skillFiles=[];for(const path of await list(join(sourceRoot,'skills/watchdog'))){let b=await readFile(join(sourceRoot,'skills/watchdog',path));if(path==='SKILL.md')b=Buffer.from(b.toString().replaceAll('../../docs/',runtimeRoot.replaceAll('\\','/')+'/docs/'));await newFile(join(packageRoot,'payload/skill',path),b);skillFiles.push({path,sha256:sha(b),bytes:b.length});}
  const info=Buffer.from(JSON.stringify({schemaVersion:1,runtimeRoot,manifestPath:join(runtimeRoot,'INSTALL-MANIFEST.json'),receiptPath,nodeExecutable:process.execPath,controlRoot,deploymentSelected:false,serviceStarted:false},null,2)+'\n');await newFile(join(packageRoot,'payload/skill/runtime-root.json'),info);skillFiles.push({path:'runtime-root.json',sha256:sha(info),bytes:info.length});
  const installer=await readFile(fileURLToPath(import.meta.url));await newFile(join(packageRoot,'install.mjs'),installer);
- const manifest={schemaVersion:'watchdog-independent-production-package/v1',createdAt:new Date().toISOString(),sourceRoot,homeRoot,agentSkillRoot,contentSha256,runtimeRoot,controlRoot,runtimeFiles,skillFiles,before,installerSha256:sha(installer),tests:runtimeFiles.filter(f=>f.path.startsWith('test/')).map(f=>f.path),businessStateIncluded:false,autostartIncluded:false,mcpConfigurationIncluded:false};
+ const manifest={schemaVersion:'watchdog-independent-production-package/v1',createdAt:new Date().toISOString(),sourceRoot,homeRoot,agentSkillRoot,contentSha256,runtimeRoot,controlRoot,runtimeFiles,skillFiles,before,installerSha256:sha(installer),tests:testFiles.filter(p=>p!=='test/watchdog-install.test.mjs'),businessStateIncluded:false,autostartIncluded:false,mcpConfigurationIncluded:false};
  const bytes=Buffer.from(JSON.stringify(manifest,null,2)+'\n');await newFile(join(packageRoot,'manifest.json'),bytes);const manifestSha256=sha(bytes);await newFile(join(packageRoot,'SHA256SUMS'),`${manifestSha256}  manifest.json\n${manifest.installerSha256}  install.mjs\n`+runtimeFiles.map(f=>`${f.sha256}  payload/runtime/${f.path}`).join('\n')+'\n'+skillFiles.map(f=>`${f.sha256}  payload/skill/${f.path}`).join('\n')+'\n');return {packageRoot,manifestSha256,runtimeRoot,controlRoot,skillTargets:targets,files:runtimeFiles.length,preparedOnly:true};
 }
 async function context(packageRoot,expected){packageRoot=resolve(packageRoot);const bytes=await readFile(join(packageRoot,'manifest.json'));need(sha(bytes)===expected,'Pinned manifest hash mismatch');const m=JSON.parse(bytes);need(m.schemaVersion==='watchdog-independent-production-package/v1','Wrong package');need(sha(await readFile(join(packageRoot,'install.mjs')))===m.installerSha256,'Installer hash drift');need(resolve(m.runtimeRoot)===resolve(join(m.homeRoot,'runtimes/watchdog','watchdog-prod-20261116-'+m.contentSha256.slice(0,12))),'Wrong version target');need(JSON.stringify(m.before.map(x=>resolve(x.target)))===JSON.stringify([resolve(join(m.homeRoot,'skills/watchdog')),resolve(join(m.agentSkillRoot,'watchdog'))]),'Wrong Skill targets');await checkRows(join(packageRoot,'payload/runtime'),m.runtimeFiles,true);await checkRows(join(packageRoot,'payload/skill'),m.skillFiles,true);return {packageRoot,m,expected,receiptPath:join(packageRoot,'install-receipt.json')};}
