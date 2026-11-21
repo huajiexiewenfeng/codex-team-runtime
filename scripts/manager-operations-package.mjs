@@ -79,7 +79,7 @@ export async function buildPackage({output=join(DEFAULTS.evidenceRoot,'package')
   }
   await payloadClosure(targets,files,output);
   const installer=await readFile(new URL('./manager-operations-install.mjs',import.meta.url));await writeFile(join(output,'install.mjs'),installer,{flag:'wx'});
-  const manifest={schemaVersion:'manager-operations-code-package/v2',createdAt:new Date().toISOString(),sourceHead:'f673659cb9eb996ccfd5876b4466de4ca42ec420',evidenceRoot:settings.evidenceRoot,targets,capabilities:await capabilities(settings.nodeExecutable,settings.pythonExecutable),installerSha256:hash(installer),baseline,dependencies,files,
+  const manifest={schemaVersion:'manager-operations-code-package/v3',createdAt:new Date().toISOString(),sourceHead:'f673659cb9eb996ccfd5876b4466de4ca42ec420',evidenceRoot:settings.evidenceRoot,targets,capabilities:await capabilities(settings.nodeExecutable,settings.pythonExecutable),installerSha256:hash(installer),baseline,dependencies,files,
     excluded:['all state/Registry/notification/task data','Python/MCP/config/model settings','shared SKILL.md/structured-submission.md','Worker/Liaison rules and prompts','all existing shared core files including worker-runtime.mjs','source E05 CLI routes','test/benchmark/compatibility/fixture tooling']};
   const bytes=Buffer.from(JSON.stringify(manifest,null,2)+'\n');await writeFile(join(output,'manifest.json'),bytes,{flag:'wx'});
   const manifestSha256=hash(bytes);await writeFile(join(output,'SHA256SUMS'),[`${manifestSha256}  manifest.json`,`${hash(installer)}  install.mjs`,...files.map(f=>`${f.sha256}  payload/${f.scope}/${f.path}`)].join('\n')+'\n',{flag:'wx'});

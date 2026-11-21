@@ -9,7 +9,7 @@ const closed=(v,keys)=>check(v&&typeof v==='object'&&!Array.isArray(v)&&Object.k
 export function validateWatchdogStore(value,statePath) {
  closed(value,['schemaVersion','statePath','teamId','enabled','anomalies','attempts','lastCheckedAt','lastFault','failures','phase','hostEvidence','counters','modelWakeups','programModelTokens','cursor','unsupportedChecks','capacityExceeded','deliveryReason','lastObservedAt','deploymentCapability','cutover']);
  check(value.schemaVersion===1&&value.statePath===statePath&&(value.teamId===null||id(value.teamId))&&typeof value.enabled==='boolean');
- check(['unmonitored','disabled','watching','sleeping','reconciling','fault'].includes(value.phase)&&['unknown','fixture'].includes(value.hostEvidence));
+ check(['unmonitored','disabled','watching','sleeping','reconciling','fault'].includes(value.phase)&&['unknown','fixture','desktop'].includes(value.hostEvidence));
  check(value.programModelTokens===0&&value.modelWakeups==='unknown');
  check(integer(value.failures)&&value.failures<=10);closed(value.counters,['checks','detected','attempts','confirmedDelivery','confirmedWakeups','completedReminderTurns','interruptedReminderTurns']);
  for(const key of ['checks','detected','attempts','confirmedDelivery','confirmedWakeups'])check(integer(value.counters[key]));
@@ -32,7 +32,7 @@ export function validateWatchdogStore(value,statePath) {
   check(['submission-unhandled','blocker-unhandled','notice-not-delivered','ended-without-submission','same-execution-host-conflict'].includes(a.type));
   check(a.key===digest([a.teamId,a.taskId,a.executionId,a.type])&&hex(a.evidenceHash)&&a.evidenceHash===digest(a.evidence));
   check(a.evidence&&typeof a.evidence==='object'&&!Array.isArray(a.evidence)&&Buffer.byteLength(JSON.stringify(a.evidence))<=12000);
-  check(['recorded-ledger','caller-assessed-notice-ledger','fixture-host'].includes(a.assurance));
+  check(['recorded-ledger','caller-assessed-notice-ledger','fixture-host','desktop-e04-envelope'].includes(a.assurance));
   check(typeof a.active==='boolean'&&integer(a.evidenceRevision)&&a.evidenceRevision>=1&&['pending','intent','queued','unknown','consumed','completed','interrupted'].includes(a.delivery));
   timestamp(a.firstSeenAt);if(a.resolvedAt!==undefined){timestamp(a.resolvedAt);check(!a.active&&a.resolvedAt>=a.firstSeenAt);}
  }

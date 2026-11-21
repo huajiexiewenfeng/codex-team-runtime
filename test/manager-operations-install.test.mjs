@@ -141,7 +141,7 @@ test('abrupt real child exit after code write leaves explicit pending lock; reco
   assert.equal((await preflight(f)).status,'ready');
 });
 
-const dispatchPayload=['src/manager-dispatch-entry.mjs','docs/manager-dispatch-entry.md'];
+const dispatchPayload=['src/manager-dispatch-entry.mjs','docs/manager-dispatch-entry.md','src/watchdog-native-user.mjs','src/watchdog-dispatch-execution.mjs'];
 async function asLegacyPackage(f){
   const path=join(f.packageRoot,'manifest.json'),m=JSON.parse(await readFile(path));
   m.schemaVersion='manager-operations-code-package/v1';
@@ -150,12 +150,12 @@ async function asLegacyPackage(f){
   return {...f,manifestSha256:hash(bytes)};
 }
 
-test('v2 package contains the fixed dispatch module/docs and no Watchdog CLI imports',async()=>{
+test('v3 package contains the fixed dispatch and optional monitoring dependencies without Watchdog CLI routes',async()=>{
   const f=await fixture(),m=JSON.parse(await readFile(join(f.packageRoot,'manifest.json')));
-  assert.equal(m.schemaVersion,'manager-operations-code-package/v2');
+  assert.equal(m.schemaVersion,'manager-operations-code-package/v3');
   for(const path of dispatchPayload)assert.ok(m.files.some(row=>row.scope==='companion'&&row.path===path));
   assert.ok(m.dependencies.some(row=>row.path==='src/manager-dispatch-entry.mjs'));
-  assert.equal(m.files.some(row=>row.path.includes('watchdog')),false);
+  assert.equal(m.files.some(row=>row.path.includes('watchdog')&&!dispatchPayload.includes(row.path)),false);
   const cli=await readFile(join(f.packageRoot,'payload/companion/src/cli.mjs'),'utf8');
   assert.match(cli,/manager-request/);assert.doesNotMatch(cli,/watchdog|inbox-/);
   await install(f);
@@ -188,7 +188,7 @@ test('frozen v1 manifest contract still preflights, applies, verifies and rolls 
   assert.equal(await readFile(facts,'utf8'),'existing business fact');
 });
 
-test('v1 cannot acquire new dispatch paths and v2 cannot omit them',async()=>{
+test('v1 cannot acquire new dispatch paths and v3 cannot omit them',async()=>{
   const old=await asLegacyPackage(await fixture()),oldPath=join(old.packageRoot,'manifest.json');
   const legacy=JSON.parse(await readFile(oldPath));legacy.files[0].path='src/manager-dispatch-entry.mjs';
   let bytes=Buffer.from(JSON.stringify(legacy));await writeFile(oldPath,bytes);

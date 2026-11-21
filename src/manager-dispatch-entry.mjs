@@ -1,5 +1,5 @@
 // Manager-only transport evidence. Business authority remains E04/managerRequest.
-import {readFile,realpath} from 'node:fs/promises';
+import {access,readFile,realpath} from 'node:fs/promises';
 import {resolve,isAbsolute} from 'node:path';
 import {atomicWrite,readRawState} from './store.mjs';
 import {withFileLocks} from './registry-projection.mjs';
@@ -65,7 +65,18 @@ export async function dispatchEntryStage(action,requestFile,payload,options={}){
    const observed=await status();
    requireValue(prepared&&prepared.inputFingerprint===fingerprint(input)&&prepared.resultRequestBase.attempt_id===observed.attemptId,'claim','exact persisted prepare');
    requireValue(observed.businessStatus==='executing'&&observed.delivery==='unknown','claim','current unresolved original attempt');
-   try{await atomicWrite(await claimPath(observed.attemptId),JSON.stringify({attemptId:observed.attemptId,inputFingerprint:fingerprint(input)})+'\n',true);}
+   let executionBoundary=null;
+   try {
+    const canonical=await realpath(input.statePath);
+    await access(canonical+'.watchdog-execution-logs.json');
+    const {captureDispatchExecutionBoundary}=await import('./watchdog-dispatch-execution.mjs');
+    let timer;
+    try {
+     const capture=readRawState(canonical).then(state=>captureDispatchExecutionBoundary(canonical,state,prepared));
+     executionBoundary=await Promise.race([capture,new Promise(resolve=>{timer=setTimeout(()=>resolve(null),750);})]);
+    } finally { clearTimeout(timer); }
+   } catch {} // Optional monitoring must not prevent dispatch.
+   try{await atomicWrite(await claimPath(observed.attemptId),JSON.stringify({attemptId:observed.attemptId,inputFingerprint:fingerprint(input),...(executionBoundary?{executionBoundary}:{})})+'\n',true);}
    catch(err){if(err.code==='EEXIST')return {status:'reconcile',reasonCode:'SEND_ALREADY_CLAIMED',sendNow:false};throw err;}
    return {status:'claimed',sendNow:true,attemptId:observed.attemptId};
   };

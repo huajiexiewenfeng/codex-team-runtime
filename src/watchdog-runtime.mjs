@@ -8,7 +8,7 @@ import { loadLedger, lastResult } from './submission-recovery.mjs';
 import { inspectWatchdog, reconcileWatchdog, timestamp, digest, watchdogPolicy,validateWatchdogPolicy } from './watchdog-checker.mjs';
 import {validateWatchdogStore,STORE_LIMITS} from './watchdog-store-contract.mjs';
 import {readWatchdogInputs,createWatchdogInputReader} from './watchdog-input.mjs';
-import {inspectWatchdogHost} from './watchdog-host.mjs';
+import {inspectWatchdogHost,watchdogExecutionCapability} from './watchdog-host.mjs';
 import {createWatchdogSchedule,nextWatchdogDelay,watchdogIntervals} from './watchdog-schedule.mjs';
 import { unavailableWatchdogAdapter, watchdogAdapterAllowed } from './watchdog-adapter.mjs';
 import {watchdogDeploymentAllowed,watchdogRegisteredStateMatches} from './watchdog-deployment.mjs';
@@ -47,7 +47,7 @@ async function processAlive(p,at) {
 }
 export async function watchdogStatus(statePath,{at=new Date().toISOString(),detail=false}={}) {
  timestamp(at);const p=await paths(statePath),s=await load(p),processState=await processAlive(p,at);
- const common={enabled:s.enabled,phase:s.enabled?s.phase:'disabled',process:processState,monitoring:s.enabled&&processState.status==='running',deliveryCapability:s.deploymentCapability?{status:s.deploymentCapability,scope:'explicit tested-local-queue reminders'}:unavailableWatchdogAdapter.capability};
+ const common={executionCapability:s.hostEvidence==='desktop'?{status:'verified',scope:'local Desktop initial E04',unsupportedChecks:['same-execution-host-conflict']}:watchdogExecutionCapability,enabled:s.enabled,phase:s.enabled?s.phase:'disabled',process:processState,monitoring:s.enabled&&processState.status==='running',deliveryCapability:s.deploymentCapability?{status:s.deploymentCapability,scope:'explicit tested-local-queue reminders'}:unavailableWatchdogAdapter.capability};
  if(detail)return {...s,...common};
  return {...common,teamId:s.teamId,lastCheckedAt:s.lastCheckedAt,lastFault:s.lastFault,counters:s.counters,modelWakeups:s.modelWakeups,programModelTokens:s.programModelTokens,hostEvidence:s.hostEvidence,unsupportedChecks:s.unsupportedChecks??['ended-without-submission','same-execution-host-conflict'],capacityExceeded:s.capacityExceeded??false,
   counts:{active:s.anomalies.filter(a=>a.active).length,pending:s.anomalies.filter(a=>a.active&&a.delivery==='pending').length,unresolvedDeliveries:s.attempts.filter(a=>['intent','unknown','queued','consumed'].includes(a.outcome)).length},
@@ -70,9 +70,9 @@ export async function checkWatchdog(statePath,{at=new Date().toISOString(),adapt
    if(s.teamId!==null&&s.teamId!==state.team.id)throw new Error('Watchdog team binding changed');
    s.teamId=state.team.id;
    let inspection=inspectWatchdog(state,at,policy);
-   const host=await inspectWatchdogHost(state,hostAdapter,at,policy);
+   const host=await inspectWatchdogHost(state,hostAdapter,at,policy,p.state);
    inspection.hostEvidence=host.status;inspection.anomalies.push(...host.anomalies);
-   if(host.status==='fixture')inspection.unsupportedChecks=['same-execution-host-conflict'];
+   if(['fixture','desktop'].includes(host.status))inspection.unsupportedChecks=['same-execution-host-conflict'];
    for(const task of state.tasks.filter(t=>t.status==='submitted')) {
     const submit=state.events.findLast(e=>e.taskId===task.id&&e.roundId===task.roundId&&e.type==='submit');
     const entries=notices.entries.filter(e=>e.notice.taskId===task.id&&e.notice.roundId===task.roundId&&e.notice.submissionId===submit?.id);
@@ -121,7 +121,7 @@ export async function checkWatchdog(statePath,{at=new Date().toISOString(),adapt
      // check. This is ledger validation, NOT a claim of host race safety.
      const fresh=await readState(p.state,readOptions);
      const freshNotices=await loadLedger(p.state+'.submission-notices.json',p.state,state.team.id);
-     const freshHost=await inspectWatchdogHost(fresh,hostAdapter,at,policy);
+     const freshHost=await inspectWatchdogHost(fresh,hostAdapter,at,policy,p.state);
      if(digest(fresh)!==digest(state)||digest(freshNotices)!==digest(notices)||digest(freshHost)!==digest(host)){s.deliveryReason='source-changed';await save(p,s);return s;}
      const keys=pending.map(a=>a.key),id=digest([s.teamId,keys,s.attempts.length,at]);
      const attempt={id,at,keys,outcome:'intent'};s.attempts.push(attempt);
@@ -136,7 +136,11 @@ export async function checkWatchdog(statePath,{at=new Date().toISOString(),adapt
        const enabled=(await load(p)).enabled,current=await readState(p.state,readOptions);
        if(!enabled||!watchdogDeploymentAllowed(deployment,p.state,current)||digest(current)!==digest(fresh))return false;
        const currentNotices=await loadLedger(p.state+'.submission-notices.json',p.state,current.team.id);
-       return digest(currentNotices)===digest(freshNotices);
+       if(digest(currentNotices)!==digest(freshNotices))return false;
+       if(!pending.some(row=>row.assurance==='desktop-e04-envelope'))return true;
+       const lastHost=await inspectWatchdogHost(current,hostAdapter,new Date(Math.max(Date.now(),timestamp(at))).toISOString(),policy,p.state);
+       const sameEvidence=pending.filter(row=>row.assurance==='desktop-e04-envelope').every(row=>lastHost.anomalies.some(candidate=>candidate.key===row.key&&candidate.evidenceHash===row.evidenceHash));
+       return sameEvidence&&digest(await readState(p.state,readOptions))===digest(current);
       };
       result=await deployment.send({receiptAttemptId:prepared.attemptId,state:fresh,at,guard});
      }else try{result=await adapter.enqueue({id,teamId:s.teamId,items:pending.map(a=>({taskId:a.taskId,executionId:a.executionId,type:a.type,evidence:a.evidence})),instruction:'Recheck current ledger and Watchdog enabled state before acting; no automatic dispatch or repair.'});}catch{result={outcome:'unknown'};}
