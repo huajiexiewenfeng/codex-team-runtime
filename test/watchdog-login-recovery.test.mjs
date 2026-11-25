@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {descriptor,options} from '../scripts/watchdog-login-recover.mjs';
+import {resolve} from 'node:path';
+const trust={manifest:resolve('fixture-production.json'),trustedHash:'a'.repeat(64)};
+const d={schemaVersion:1,kind:'watchdog-local-control',ownerNonce:'fixture',startedAt:'2026-11-21T03:21:56.121Z',manifestPath:trust.manifest,manifestSha256:trust.trustedHash};
+test('explicit pinned deployment accepts a portable path',()=>assert.doesNotThrow(()=>descriptor(d,trust)));
+for(const [key,value] of [['schemaVersion',2],['kind','other'],['ownerNonce',''],['startedAt','invalid'],['manifestPath',resolve('other.json')],['manifestSha256','0'.repeat(64)]])test('reject '+key,()=>assert.throws(()=>descriptor({...d,[key]:value},trust)));
+const args=['--binding',resolve('binding.json'),'--installation-sha256','b'.repeat(64),'--manifest',trust.manifest,'--manifest-sha256',trust.trustedHash];
+test('default check requires explicit installation and deployment hashes',()=>{assert.equal(options(args).apply,false);assert.equal(options([...args,'--apply']).apply,true);});
+for(const bad of [[],['--binding','relative.json'],[...args,'--apply','--check'],[...args,'--unknown'],[...args,'--manifest',trust.manifest]])test('reject invalid arguments '+JSON.stringify(bad),()=>assert.throws(()=>options(bad)));

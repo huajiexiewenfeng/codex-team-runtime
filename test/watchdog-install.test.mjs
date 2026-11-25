@@ -25,3 +25,12 @@ test('package includes transitive test helpers but never recursively runs instal
  const receipt=await installWatchdogPackage(p.packageRoot,p.manifestSha256);
  assert.equal(receipt.status,'installed-offline-verified');assert.equal(receipt.tests.passed,2);
 });
+
+test('login recovery helpers and PowerShell guard test ship in independent runtime',async t=>{
+ const f=await fixture(t);
+ for(const name of ['watchdog-login-recover.mjs','watchdog-login-transaction-guard.ps1','watchdog-login-task.ps1'])await writeFile(join(f.sourceRoot,'scripts',name),'fixture helper');
+ await writeFile(join(f.sourceRoot,'test/watchdog-login-transaction-guard.test.ps1'),'fixture isolated test');
+ const p=await prepareWatchdogPackage(f),manifest=JSON.parse(await readFile(join(p.packageRoot,'manifest.json'),'utf8'));
+ for(const path of ['scripts/watchdog-login-recover.mjs','scripts/watchdog-login-transaction-guard.ps1','scripts/watchdog-login-task.ps1','test/watchdog-login-transaction-guard.test.ps1'])assert.ok(manifest.runtimeFiles.some(f=>f.path===path),path);
+ assert.equal(manifest.autostartIncluded,false);
+});

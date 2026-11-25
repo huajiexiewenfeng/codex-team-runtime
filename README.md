@@ -266,3 +266,5 @@ node src/cli.mjs metrics-export <state.json> <ledger.json> <新输出目录> [as
 [MIT](LICENSE)
 
 单团队正式三视图及固定来源启动方式见 [Dashboard v2](docs/dashboard-ui-v2.md)。
+
+Windows 登录恢复：见 [登录恢复安装、注册与禁用](docs/watchdog-login-recovery.md)。恢复功能随独立安装包交付，需显式固定安装和生产清单哈希；默认检查，不自动注册。
